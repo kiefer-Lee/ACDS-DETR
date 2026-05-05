@@ -1,0 +1,45 @@
+_base_: default.yaml
+
+output_dir: outputs/smoke
+
+dataset:
+  name: visdrone
+  root: D:/PythonProjects/SOD/Datasets/VisDroneMini
+  train_split: train
+  val_split: val
+  num_classes: 10
+  img_size: 128
+  max_size: 192
+  max_samples: 2
+
+model:
+  num_classes: 10
+  backbone: resnet18
+  num_queries: 10
+  hidden_dim: 256
+  nheads: 8
+  num_feature_levels: 4
+  enc_layers: 1
+  dec_layers: 1
+  dim_feedforward: 512
+  num_points: 2
+
+train:
+  epochs: 1
+  batch_size: 1
+  num_workers: 0
+  lr: 0.0002
+  lr_backbone: 0.00002
+  val_freq: 1
+  print_freq: 1
+
+acq:
+  enabled: true
+  lambda_acq: 0.1
+  small_area_thr: 1024
+  topk_unmatched: 10
+  delta: 0.03
+  sigma: 0.05
+  min_score: 0.1
+  apply_last_n_layers: 1
+

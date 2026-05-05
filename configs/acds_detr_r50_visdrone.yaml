@@ -1,0 +1,25 @@
+_base_: default.yaml
+
+dataset:
+  name: visdrone
+  root: D:/PythonProjects/SOD/Datasets/VisDrone
+  train_split: train
+  val_split: val
+  num_classes: 10
+  img_size: 800
+  max_size: 1333
+
+model:
+  num_classes: 10
+  backbone: resnet50
+  num_queries: 300
+  enc_layers: 3
+  dec_layers: 6
+
+train:
+  epochs: 50
+  batch_size: 2
+  num_workers: 2
+  lr: 0.0002
+  lr_backbone: 0.00002
+

@@ -1,0 +1,15 @@
+*.pyc
+*.png
+*.jpg
+*.jpeg
+*.log
+__pycache__/
+venv/
+env/
+.idea/
+.DS_Store
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl

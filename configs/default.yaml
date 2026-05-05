@@ -1,0 +1,75 @@
+seed: 42
+output_dir: outputs/acds_detr
+device: auto
+gpu: null
+distributed: false
+
+dataset:
+  name: visdrone
+  root: D:/PythonProjects/SOD/Datasets/VisDrone
+  train_split: train
+  val_split: val
+  num_classes: 10
+  img_size: 800
+  max_size: 1333
+  min_area: 1
+
+model:
+  num_classes: 10
+  num_queries: 300
+  hidden_dim: 256
+  nheads: 8
+  num_feature_levels: 4
+  enc_layers: 3
+  dec_layers: 6
+  dim_feedforward: 1024
+  dropout: 0.1
+  num_points: 4
+  backbone: resnet50
+  pretrained_backbone: false
+
+acq:
+  enabled: true
+  lambda_acq: 0.1
+  small_area_thr: 1024
+  topk_unmatched: 50
+  delta: 0.03
+  sigma: 0.05
+  min_score: 0.3
+  apply_last_n_layers: 2
+
+rsnds:
+  enabled: true
+  beta: 1.0
+  gamma_base: 1.0
+  gamma_min: 0.25
+  gamma_max: 1.5
+  reliability: cls_conf
+
+loss:
+  eos_coef: 0.1
+  cost_class: 2.0
+  cost_bbox: 5.0
+  cost_giou: 2.0
+  weight_class: 1.0
+  weight_bbox: 5.0
+  weight_giou: 2.0
+
+train:
+  epochs: 50
+  batch_size: 2
+  num_workers: 2
+  lr: 0.0002
+  lr_backbone: 0.00002
+  weight_decay: 0.0001
+  clip_max_norm: 0.1
+  print_freq: 20
+  val_freq: 1
+  amp: false
+  resume: null
+
+eval:
+  score_thresh: 0.05
+  max_detections: 100
+  iou_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+
