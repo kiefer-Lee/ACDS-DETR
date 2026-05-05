@@ -3,7 +3,7 @@ from pathlib import Path
 import torch
 
 
-def save_checkpoint(path, model, optimizer, scheduler, epoch, cfg):
+def save_checkpoint(path, model, optimizer, scheduler, epoch, cfg, meta=None):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     state = {
         "model": model.module.state_dict() if hasattr(model, "module") else model.state_dict(),
@@ -11,6 +11,7 @@ def save_checkpoint(path, model, optimizer, scheduler, epoch, cfg):
         "scheduler": scheduler.state_dict() if scheduler is not None else None,
         "epoch": epoch,
         "cfg": cfg,
+        "meta": meta or {},
     }
     torch.save(state, path)
 
@@ -23,4 +24,3 @@ def load_checkpoint(path, model, optimizer=None, scheduler=None, map_location="c
     if scheduler is not None and ckpt.get("scheduler") is not None:
         scheduler.load_state_dict(ckpt["scheduler"])
     return ckpt
-

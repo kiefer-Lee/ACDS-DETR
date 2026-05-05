@@ -1,0 +1,5 @@
+_base_: exp_rsnds_only_stable.yaml
+output_dir: outputs/ablation_rsnds
+train:
+  debug_dir: outputs/ablation_rsnds/debug
+

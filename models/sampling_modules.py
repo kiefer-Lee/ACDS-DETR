@@ -20,7 +20,8 @@ class ReliabilityGuidedScaleSampler(nn.Module):
         self.gamma_max = gamma_max
         self.reliability = reliability
         self.enabled = enabled
-        self.mlp = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 1))
+        # Avoid registering unused parameters under DDP when cls_conf reliability is used.
+        self.mlp = nn.Sequential(nn.Linear(hidden_dim, hidden_dim), nn.ReLU(), nn.Linear(hidden_dim, 1)) if reliability == "mlp" else None
 
     def forward(self, query, pred_boxes, pred_logits=None):
         if not self.enabled or pred_boxes is None:
@@ -31,10 +32,13 @@ class ReliabilityGuidedScaleSampler(nn.Module):
         gamma_scale = self.beta * torch.sqrt(wh[..., 0] * wh[..., 1]).unsqueeze(-1)
         gamma_scale = gamma_scale.clamp(self.gamma_min, self.gamma_max)
         if self.reliability == "mlp" or pred_logits is None:
+            if self.mlp is None:
+                rho = query.new_zeros(query.shape[:2] + (1,))
+                gamma = query.new_full(query.shape[:2] + (1,), self.gamma_base)
+                return gamma, rho
             rho = torch.sigmoid(self.mlp(query))
         else:
             prob = pred_logits.softmax(-1)[..., :-1]
             rho = prob.max(-1, keepdim=True).values.detach()
         gamma = (1.0 - rho) * self.gamma_base + rho * gamma_scale
         return gamma, rho
-

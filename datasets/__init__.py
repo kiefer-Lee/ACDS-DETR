@@ -15,4 +15,5 @@ def build_dataset(split, cfg):
         train=split == "train",
         min_area=cfg["dataset"].get("min_area", 1),
         max_samples=cfg["dataset"].get("max_samples"),
+        augment=cfg["dataset"].get("augment", {}),
     )

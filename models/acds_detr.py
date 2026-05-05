@@ -17,6 +17,7 @@ class ACDSDETR(nn.Module):
             pretrained=mcfg.get("pretrained_backbone", False),
             hidden_dim=mcfg["hidden_dim"],
             num_feature_levels=mcfg["num_feature_levels"],
+            pretrained_path=mcfg.get("pretrained_backbone_path"),
         )
         transformer_cfg = dict(mcfg)
         transformer_cfg["rsnds"] = cfg["rsnds"]
@@ -51,4 +52,3 @@ class ACDSDETR(nn.Module):
 
 def build_model(cfg):
     return ACDSDETR(cfg)
-

@@ -22,13 +22,14 @@ VISDRONE_CLASSES = {
 
 
 class VisDroneDetection(Dataset):
-    def __init__(self, root, split="train", img_size=800, max_size=1333, train=True, min_area=1, max_samples=None):
+    def __init__(self, root, split="train", img_size=800, max_size=1333, train=True, min_area=1, max_samples=None, augment=None):
         self.root = Path(root)
         self.split = split
         self.img_size = img_size
         self.max_size = max_size
         self.train = train
         self.min_area = min_area
+        self.augment = augment or {}
         split_name = "VisDrone2019-DET-train" if split == "train" else "VisDrone2019-DET-val"
         base = self.root / split_name / split_name
         if not base.exists():
@@ -82,5 +83,5 @@ class VisDroneDetection(Dataset):
             "size": torch.tensor([h, w], dtype=torch.int64),
             "file_name": str(image_path),
         }
-        image, target = apply_transforms(image, target, self.train, self.img_size, self.max_size)
+        image, target = apply_transforms(image, target, self.train, self.img_size, self.max_size, self.augment)
         return image, target

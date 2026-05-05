@@ -3,6 +3,9 @@ import time
 import torch
 
 from utils.metrics import DetectionMetrics, postprocess
+from utils.coco_eval import coco_evaluate
+from utils.distributed import all_gather_object
+from utils.misc import is_main_process
 from utils.misc import SmoothedValue, move_to_device
 
 
@@ -15,6 +18,7 @@ def evaluate(model, criterion, data_loader, device, cfg, logger=None):
         num_classes=cfg["model"]["num_classes"],
         iou_thresholds=cfg["eval"]["iou_thresholds"],
         small_area_thr=cfg["acq"]["small_area_thr"],
+        dense_small_count_thr=cfg["eval"].get("dense_small_count_thr", 20),
     )
     infer_time = 0.0
     num_images = 0
@@ -38,9 +42,34 @@ def evaluate(model, criterion, data_loader, device, cfg, logger=None):
                 loss_meters.setdefault(k, SmoothedValue()).update(float(v.detach()))
         preds = postprocess(outputs, targets_dev, cfg["eval"]["score_thresh"], cfg["eval"]["max_detections"])
         metrics.update(preds, targets)
-    result = metrics.compute()
-    result["FPS"] = num_images / max(1e-6, infer_time)
+    gathered_preds = all_gather_object(metrics.preds)
+    gathered_targets = all_gather_object(metrics.targets)
+    if is_main_process():
+        metrics.preds = [item for part in gathered_preds for item in part]
+        metrics.targets = [item for part in gathered_targets for item in part]
+        result = None
+        if cfg["eval"].get("use_coco_eval", True):
+            result = coco_evaluate(metrics.preds, metrics.targets, cfg["model"]["num_classes"])
+        if result is None:
+            result = metrics.compute()
+        else:
+            supplemental = metrics.compute()
+            for key in ("precision", "recall", "Dense_images", "Dense_AP_small", "Dense_AR_small"):
+                result.setdefault(key, supplemental.get(key, 0.0))
+    else:
+        result = {}
     losses = {k: m.avg for k, m in loss_meters.items()}
+    gathered_losses = all_gather_object(losses)
+    gathered_speed = all_gather_object({"num_images": num_images, "infer_time": infer_time})
+    if is_main_process():
+        loss_keys = sorted({k for part in gathered_losses for k in part.keys()})
+        losses = {k: sum(float(part.get(k, 0.0)) for part in gathered_losses) / max(1, len(gathered_losses)) for k in loss_keys}
+        total_images = sum(part["num_images"] for part in gathered_speed)
+        total_time = sum(part["infer_time"] for part in gathered_speed)
+        result["FPS"] = total_images / max(1e-6, total_time)
+    else:
+        losses = {}
+        result["FPS"] = 0.0
     if logger:
         logger.info(
             "val "
@@ -49,4 +78,3 @@ def evaluate(model, criterion, data_loader, device, cfg, logger=None):
             + " ".join(f"{k}={v:.4f}" for k, v in result.items())
         )
     return losses, result
-

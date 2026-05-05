@@ -40,3 +40,10 @@ def reduce_dict(input_dict):
     values /= dist.get_world_size()
     return {k: v for k, v in zip(names, values)}
 
+
+def all_gather_object(data):
+    if not (dist.is_available() and dist.is_initialized()):
+        return [data]
+    gathered = [None for _ in range(dist.get_world_size())]
+    dist.all_gather_object(gathered, data)
+    return gathered

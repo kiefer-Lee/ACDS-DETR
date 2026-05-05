@@ -3,6 +3,8 @@
 *.jpg
 *.jpeg
 *.log
+*.pth
+outputs/
 __pycache__/
 venv/
 env/

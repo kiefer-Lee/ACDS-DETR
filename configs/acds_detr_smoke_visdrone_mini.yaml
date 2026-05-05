@@ -11,6 +11,9 @@ dataset:
   img_size: 128
   max_size: 192
   max_samples: 2
+  augment:
+    multi_scale: []
+    zoom_crop_prob: 0.0
 
 model:
   num_classes: 10
@@ -32,6 +35,8 @@ train:
   lr_backbone: 0.00002
   val_freq: 1
   print_freq: 1
+  persistent_workers: false
+  prefetch_factor: 2
 
 acq:
   enabled: true
@@ -42,4 +47,3 @@ acq:
   sigma: 0.05
   min_score: 0.1
   apply_last_n_layers: 1
-

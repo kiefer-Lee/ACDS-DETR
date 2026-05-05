@@ -1,0 +1,7 @@
+_base_: exp_acds_full_stable.yaml
+output_dir: outputs/ablation_acq_lambda_001
+acq:
+  lambda_acq: 0.01
+train:
+  debug_dir: outputs/ablation_acq_lambda_001/debug
+

@@ -10,7 +10,7 @@ from .position_encoding import PositionEmbeddingSine
 
 
 class Backbone(nn.Module):
-    def __init__(self, name="resnet50", pretrained=False, train_backbone=True, hidden_dim=256, num_feature_levels=4):
+    def __init__(self, name="resnet50", pretrained=False, train_backbone=True, hidden_dim=256, num_feature_levels=4, pretrained_path=None):
         super().__init__()
         if name == "resnet18":
             backbone = torchvision.models.resnet18(weights=None if not pretrained else "DEFAULT")
@@ -20,6 +20,14 @@ class Backbone(nn.Module):
             channels = [512, 1024, 2048]
         else:
             raise ValueError(f"Unsupported backbone: {name}")
+        if pretrained_path:
+            state = torch.load(pretrained_path, map_location="cpu")
+            if isinstance(state, dict) and "state_dict" in state:
+                state = state["state_dict"]
+            if isinstance(state, dict) and "model" in state:
+                state = state["model"]
+            cleaned = {k.replace("module.", ""): v for k, v in state.items()}
+            backbone.load_state_dict(cleaned, strict=False)
         for pname, p in backbone.named_parameters():
             if not train_backbone or ("layer2" not in pname and "layer3" not in pname and "layer4" not in pname):
                 p.requires_grad_(False)
@@ -51,4 +59,3 @@ class Backbone(nn.Module):
             masks.append(m)
             pos.append(self.position_embedding(m))
         return out, masks, pos
-

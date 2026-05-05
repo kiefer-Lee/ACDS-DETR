@@ -1,0 +1,5 @@
+_base_: exp_acq_only_stable.yaml
+output_dir: outputs/ablation_acq
+train:
+  debug_dir: outputs/ablation_acq/debug
+

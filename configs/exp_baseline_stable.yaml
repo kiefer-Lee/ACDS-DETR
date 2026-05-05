@@ -1,0 +1,36 @@
+_base_: default.yaml
+
+output_dir: outputs/exp_baseline_stable
+
+model:
+  pretrained_backbone: false
+
+acq:
+  enabled: false
+  lambda_acq: 0.0
+  small_area_thr: 1024
+  topk_unmatched: 50
+  delta: 0.03
+  sigma: 0.05
+  min_score: 0.3
+  apply_last_n_layers: 2
+
+rsnds:
+  enabled: false
+  beta: 1.0
+  gamma_base: 1.0
+  gamma_min: 0.5
+  gamma_max: 1.0
+  reliability: cls_conf
+
+loss:
+  aux_loss_weight: 0.5
+  aux_loss_layers: all
+
+train:
+  lr: 0.00005
+  lr_backbone: 0.000005
+  clip_max_norm: 0.05
+  skip_nonfinite: true
+  debug_dir: outputs/exp_baseline_stable/debug
+

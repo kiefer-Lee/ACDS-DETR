@@ -1,4 +1,5 @@
 import torch
+import torch.distributed as dist
 from torch import nn
 
 from models.matcher import HungarianMatcher
@@ -22,7 +23,18 @@ class SetCriterion(nn.Module):
             "loss_giou": lcfg["weight_giou"],
             "loss_acq": cfg["acq"]["lambda_acq"],
         }
+        self.aux_loss_weight = lcfg.get("aux_loss_weight", 1.0)
+        self.aux_loss_layers = lcfg.get("aux_loss_layers", "all")
         self.acq = ACQLoss(cfg["acq"])
+        aux_count = max(0, cfg["model"].get("dec_layers", 1) - 1)
+        if isinstance(self.aux_loss_layers, int):
+            start_layer = max(0, aux_count - self.aux_loss_layers)
+        else:
+            start_layer = 0
+        for i in range(start_layer, aux_count):
+            self.weight_dict[f"loss_ce_{i}"] = self.weight_dict["loss_ce"] * self.aux_loss_weight
+            self.weight_dict[f"loss_bbox_{i}"] = self.weight_dict["loss_bbox"] * self.aux_loss_weight
+            self.weight_dict[f"loss_giou_{i}"] = self.weight_dict["loss_giou"] * self.aux_loss_weight
 
     def _prepare_targets(self, targets, device):
         out = []
@@ -38,7 +50,11 @@ class SetCriterion(nn.Module):
         targets = self._prepare_targets(targets, outputs["pred_logits"].device)
         indices = self.matcher(outputs, targets)
         num_boxes = sum(len(t["labels"]) for t in targets)
-        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=outputs["pred_logits"].device).clamp(min=1).item()
+        num_boxes = torch.as_tensor([num_boxes], dtype=torch.float, device=outputs["pred_logits"].device)
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(num_boxes)
+            num_boxes = num_boxes / dist.get_world_size()
+        num_boxes = num_boxes.clamp(min=1).item()
         loss_ce = loss_labels(outputs, targets, indices, num_boxes, self.num_classes, self.empty_weight)
         loss_bbox, loss_giou = loss_boxes(outputs, targets, indices, num_boxes)
         loss_dict = {"loss_ce": loss_ce, "loss_bbox": loss_bbox, "loss_giou": loss_giou}
@@ -46,16 +62,20 @@ class SetCriterion(nn.Module):
         acq_loss, acq_stats = self.acq(acq_outputs, targets, indices)
         loss_dict["loss_acq"] = acq_loss
         loss_dict.update(acq_stats)
-        for i, aux in enumerate(outputs.get("aux_outputs", [])):
+        aux_outputs = outputs.get("aux_outputs", [])
+        if isinstance(self.aux_loss_layers, int):
+            start_layer = max(0, len(aux_outputs) - self.aux_loss_layers)
+        else:
+            start_layer = 0
+        for i, aux in enumerate(aux_outputs):
+            if i < start_layer:
+                continue
             aux_indices = self.matcher(aux, targets)
             l_ce = loss_labels(aux, targets, aux_indices, num_boxes, self.num_classes, self.empty_weight)
             l_bbox, l_giou = loss_boxes(aux, targets, aux_indices, num_boxes)
             loss_dict[f"loss_ce_{i}"] = l_ce
             loss_dict[f"loss_bbox_{i}"] = l_bbox
             loss_dict[f"loss_giou_{i}"] = l_giou
-            self.weight_dict.setdefault(f"loss_ce_{i}", self.weight_dict["loss_ce"])
-            self.weight_dict.setdefault(f"loss_bbox_{i}", self.weight_dict["loss_bbox"])
-            self.weight_dict.setdefault(f"loss_giou_{i}", self.weight_dict["loss_giou"])
         return loss_dict
 
 

@@ -114,7 +114,7 @@ class DeformableTransformer(nn.Module):
             pred_logits = class_embed(tgt)
             delta = bbox_embed(tgt)
             if reference.shape[-1] == 2:
-                tmp = delta
+                tmp = delta.clone()
                 tmp[..., :2] = tmp[..., :2] + inverse_sigmoid(reference)
                 pred_boxes = tmp.sigmoid()
             else:
@@ -134,4 +134,3 @@ class DeformableTransformer(nn.Module):
             "sampling_locations": sampling_locations,
             "attention_weights": attention_weights,
         }
-

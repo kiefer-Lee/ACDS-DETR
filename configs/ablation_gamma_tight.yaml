@@ -1,0 +1,9 @@
+_base_: exp_acds_full_stable.yaml
+
+output_dir: outputs/ablation_gamma_tight
+
+rsnds:
+  enabled: true
+  gamma_min: 0.25
+  gamma_max: 1.0
+

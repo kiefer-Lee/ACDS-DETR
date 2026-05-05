@@ -1,0 +1,8 @@
+_base_: exp_acds_full_stable.yaml
+output_dir: outputs/ablation_rsnds_gamma_wide
+rsnds:
+  gamma_min: 0.25
+  gamma_max: 1.5
+train:
+  debug_dir: outputs/ablation_rsnds_gamma_wide/debug
+
