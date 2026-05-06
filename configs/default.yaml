@@ -6,7 +6,7 @@ distributed: false
 
 dataset:
   name: visdrone
-  root: D:/PythonProjects/SOD/Datasets/VisDrone
+  root: ../Datasets/VisDrone
   train_split: train
   val_split: val
   num_classes: 10
@@ -33,7 +33,7 @@ model:
   num_points: 4
   return_intermediates: false
   backbone: resnet50
-  pretrained_backbone: false
+  pretrained_backbone: true
   pretrained_backbone_path: null
 
 acq:
@@ -66,16 +66,16 @@ loss:
   aux_loss_layers: all
 
 train:
-  epochs: 50
-  batch_size: 2
-  num_workers: 2
-  lr: 0.0002
-  lr_backbone: 0.00002
+  epochs: 200
+  batch_size: 10
+  num_workers: 12
+  lr: 0.00005
+  lr_backbone: 0.000005
   weight_decay: 0.0001
   clip_max_norm: 0.1
-  print_freq: 20
-  val_freq: 1
-  amp: false
+  print_freq: 1
+  val_freq: 10
+  amp: true
   deterministic: false
   benchmark: false
   persistent_workers: true
