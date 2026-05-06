@@ -1,24 +1,42 @@
+import warnings
+
 import torch
 from torch import nn
 import torch.nn.functional as F
 
+try:
+    from models.ops.functions.ms_deform_attn_func import MSDeformAttnFunction
+    HAS_MS_DEFORM_ATTN = True
+except Exception as exc:
+    MSDeformAttnFunction = None
+    HAS_MS_DEFORM_ATTN = False
+    _IMPORT_ERROR = exc
+
 
 class MultiScaleDeformableAttention(nn.Module):
-    """Pure PyTorch multi-scale deformable attention.
+    """Multi-scale deformable attention with official CUDA MSDeformAttn op.
 
-    This is slower than the CUDA op used by the official Deformable DETR, but it
-    keeps the project portable and makes R-SNDS easy to inspect.
+    It keeps the local ACDS-DETR interface unchanged:
+    forward(query, srcs, masks, reference_points, gamma=None)
     """
 
-    def __init__(self, d_model=256, n_heads=8, n_levels=4, n_points=4, dropout=0.1):
+    def __init__(self, d_model=256, n_heads=8, n_levels=4, n_points=4, dropout=0.1, im2col_step=64):
         super().__init__()
         if d_model % n_heads != 0:
             raise ValueError("d_model must be divisible by n_heads")
+        if not HAS_MS_DEFORM_ATTN:
+            raise ImportError(
+                "Official MSDeformAttn CUDA op is unavailable. "
+                "Compile it with: cd models/ops && sh make.sh && python test.py"
+            ) from _IMPORT_ERROR
+
         self.d_model = d_model
         self.n_heads = n_heads
         self.n_levels = n_levels
         self.n_points = n_points
         self.head_dim = d_model // n_heads
+        self.im2col_step = im2col_step
+
         self.sampling_offsets = nn.Linear(d_model, n_heads * n_levels * n_points * 2)
         self.attention_weights = nn.Linear(d_model, n_heads * n_levels * n_points)
         self.value_proj = nn.Linear(d_model, d_model)
@@ -26,35 +44,65 @@ class MultiScaleDeformableAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, query, srcs, masks, reference_points, gamma=None):
-        bs, q, _ = query.shape
-        offsets = self.sampling_offsets(query).view(bs, q, self.n_heads, self.n_levels, self.n_points, 2)
+        bs, num_queries, _ = query.shape
+
+        value_list = []
+        mask_list = []
+        spatial_shapes = []
+        for src, mask in zip(srcs, masks):
+            _, _, h, w = src.shape
+            spatial_shapes.append((h, w))
+            value_list.append(src.flatten(2).transpose(1, 2))
+            mask_list.append(mask.flatten(1))
+
+        value = torch.cat(value_list, dim=1)
+        key_padding_mask = torch.cat(mask_list, dim=1)
+        spatial_shapes = torch.as_tensor(spatial_shapes, dtype=torch.long, device=query.device)
+        level_start_index = torch.cat(
+            (
+                spatial_shapes.new_zeros((1,)),
+                spatial_shapes.prod(1).cumsum(0)[:-1],
+            )
+        )
+
+        value = self.value_proj(value)
+        value = value.masked_fill(key_padding_mask[..., None], 0.0)
+        value = value.view(bs, -1, self.n_heads, self.head_dim)
+
+        offsets = self.sampling_offsets(query).view(
+            bs, num_queries, self.n_heads, self.n_levels, self.n_points, 2
+        )
         if gamma is not None:
             offsets = offsets * gamma[:, :, None, None, None, :]
-        attn = self.attention_weights(query).view(bs, q, self.n_heads, self.n_levels * self.n_points)
-        attn = attn.softmax(-1).view(bs, q, self.n_heads, self.n_levels, self.n_points)
-        outputs = query.new_zeros(bs, q, self.n_heads, self.head_dim)
-        sampling_locations = []
-        for lvl, src in enumerate(srcs):
-            _, c, h, w = src.shape
-            value = self.value_proj(src.flatten(2).transpose(1, 2)).transpose(1, 2).view(bs, self.n_heads, self.head_dim, h, w)
-            norm = query.new_tensor([w, h])
-            ref = reference_points
-            if ref.shape[-1] == 4:
-                ref_xy = ref[..., :2]
-                ref_wh = ref[..., 2:].clamp(min=1e-4)
-                loc = ref_xy[:, :, None, None, :] + offsets[:, :, :, lvl] / self.n_points * ref_wh[:, :, None, None, :]
-            else:
-                loc = ref[:, :, None, None, :] + offsets[:, :, :, lvl] / norm
-            loc = loc.clamp(0, 1)
-            grid = loc.permute(0, 2, 1, 3, 4).reshape(bs * self.n_heads, q * self.n_points, 1, 2)
-            grid = grid * 2.0 - 1.0
-            value = value.reshape(bs * self.n_heads, self.head_dim, h, w)
-            sampled = F.grid_sample(value, grid, mode="bilinear", padding_mode="zeros", align_corners=False)
-            sampled = sampled.view(bs, self.n_heads, self.head_dim, q, self.n_points).permute(0, 3, 1, 4, 2)
-            w_attn = attn[:, :, :, lvl].unsqueeze(-1)
-            outputs = outputs + (sampled * w_attn).sum(3)
-            sampling_locations.append(loc.detach())
-        outputs = outputs.flatten(2)
-        outputs = self.output_proj(outputs)
-        return self.dropout(outputs), torch.stack(sampling_locations, dim=3), attn.detach()
 
+        attention_weights = self.attention_weights(query).view(
+            bs, num_queries, self.n_heads, self.n_levels * self.n_points
+        )
+        attention_weights = attention_weights.softmax(-1).view(
+            bs, num_queries, self.n_heads, self.n_levels, self.n_points
+        )
+
+        if reference_points.shape[-1] == 2:
+            normalizer = torch.stack([spatial_shapes[:, 1], spatial_shapes[:, 0]], dim=-1)
+            sampling_locations = (
+                reference_points[:, :, None, None, None, :]
+                + offsets / normalizer[None, None, None, :, None, :]
+            )
+        elif reference_points.shape[-1] == 4:
+            sampling_locations = (
+                reference_points[:, :, None, None, None, :2]
+                + offsets / self.n_points * reference_points[:, :, None, None, None, 2:] * 0.5
+            )
+        else:
+            raise ValueError("reference_points last dim must be 2 or 4")
+
+        output = MSDeformAttnFunction.apply(
+            value,
+            spatial_shapes,
+            level_start_index,
+            sampling_locations,
+            attention_weights,
+            self.im2col_step,
+        )
+        output = self.output_proj(output)
+        return self.dropout(output), sampling_locations.detach(), attention_weights.detach()
