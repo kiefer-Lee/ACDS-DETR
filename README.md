@@ -609,6 +609,20 @@ python tools/train.py --config configs/exp_acds_full_final.yaml --gpu 0
 
 稳定配置使用较低学习率、较小辅助损失权重、保守 R-SNDS 半径和 NaN 安全训练策略。
 
+如果训练速度过慢，建议先使用快速配置完成方法验证：
+
+```bash
+python tools/train.py --config configs/exp_acds_full_fast.yaml --gpu 0
+```
+
+显存或时间更紧张时，可以使用 ResNet-18 快速配置：
+
+```bash
+python tools/train.py --config configs/exp_acds_full_fast_r18.yaml --gpu 0
+```
+
+快速配置会降低输入尺度、query 数量和 decoder/encoder 层数，并把验证频率改为每 5 个 epoch 一次。该配置适合调参和消融预筛选；最终论文主结果仍建议使用稳定配置或最终配置重新训练。
+
 ### 13.4 单卡训练
 
 使用 GPU 0：

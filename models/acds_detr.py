@@ -44,9 +44,11 @@ class ACDSDETR(nn.Module):
             "all_pred_logits": logits,
             "all_pred_boxes": boxes,
             "reference_points": trans_out["reference_points"],
-            "sampling_locations": trans_out["sampling_locations"],
-            "attention_weights": trans_out["attention_weights"],
         }
+        if "sampling_locations" in trans_out:
+            out["sampling_locations"] = trans_out["sampling_locations"]
+        if "attention_weights" in trans_out:
+            out["attention_weights"] = trans_out["attention_weights"]
         return out
 
 

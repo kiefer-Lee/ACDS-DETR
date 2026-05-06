@@ -100,7 +100,7 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, cfg
             meters.setdefault(k, SmoothedValue()).update(float(v))
         if logger and i % print_freq == 0:
             msg = f"epoch={epoch} iter={i}/{len(data_loader)} " + " ".join(
-                f"{k}={m.avg:.4f}" for k, m in meters.items() if k.startswith("loss") or k in ("query_collision_rate", "grad_norm")
+                f"{k}={m.avg:.4f}" for k, m in meters.items() if k.startswith("loss") or k in ("query_collision_rate", "grad_norm", "data_time", "iter_time")
             )
             logger.info(msg)
         end = time.time()

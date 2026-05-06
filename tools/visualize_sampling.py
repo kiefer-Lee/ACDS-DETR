@@ -34,6 +34,7 @@ def main():
     args = parser.parse_args()
 
     cfg = load_config(args.config)
+    cfg.setdefault("model", {})["return_intermediates"] = True
     device = torch.device("cpu")
     if torch.cuda.is_available():
         if args.gpu is not None:
@@ -73,4 +74,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

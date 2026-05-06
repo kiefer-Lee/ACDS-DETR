@@ -65,6 +65,7 @@ class DeformableTransformer(nn.Module):
         d_model = cfg["hidden_dim"]
         self.d_model = d_model
         self.num_layers = cfg["dec_layers"]
+        self.return_intermediates = cfg.get("return_intermediates", False)
         self.encoder_layers = nn.ModuleList([
             EncoderLayer(d_model, cfg["nheads"], cfg["dim_feedforward"], cfg["dropout"])
             for _ in range(cfg["enc_layers"])
@@ -124,13 +125,16 @@ class DeformableTransformer(nn.Module):
             outputs_coords.append(pred_boxes)
             hs.append(tgt)
             refs.append(reference)
-            sampling_locations.append(locs)
-            attention_weights.append(attn)
-        return {
+            if self.return_intermediates:
+                sampling_locations.append(locs)
+                attention_weights.append(attn)
+        out = {
             "hs": torch.stack(hs),
             "pred_logits": torch.stack(outputs_classes),
             "pred_boxes": torch.stack(outputs_coords),
             "reference_points": refs,
-            "sampling_locations": sampling_locations,
-            "attention_weights": attention_weights,
         }
+        if self.return_intermediates:
+            out["sampling_locations"] = sampling_locations
+            out["attention_weights"] = attention_weights
+        return out
