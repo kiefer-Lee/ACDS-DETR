@@ -49,7 +49,7 @@ def evaluate(model, criterion, data_loader, device, cfg, logger=None):
         metrics.targets = [item for part in gathered_targets for item in part]
         result = None
         if cfg["eval"].get("use_coco_eval", True):
-            result = coco_evaluate(metrics.preds, metrics.targets, cfg["model"]["num_classes"])
+            result = coco_evaluate(metrics.preds, metrics.targets, cfg["model"]["num_classes"], cfg["eval"].get("max_detections", 100))
         if result is None:
             result = metrics.compute()
         else:

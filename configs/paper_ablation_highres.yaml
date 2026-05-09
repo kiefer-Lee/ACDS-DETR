@@ -1,0 +1,12 @@
+_base_: paper_baseline_original.yaml
+
+output_dir: outputs/paper_ablation_highres
+
+dataset:
+  img_size: 1024
+  max_size: 1800
+  augment:
+    multi_scale: [896, 960, 1024, 1088, 1152]
+
+train:
+  batch_size: 1

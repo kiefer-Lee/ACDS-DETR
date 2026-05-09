@@ -1,0 +1,40 @@
+_base_: default.yaml
+
+output_dir: outputs/paper_baseline_original
+
+dataset:
+  root: /data/libaichuan/Projects/SOD/Datasets/VisDrone
+  img_size: 800
+  max_size: 1333
+  augment:
+    multi_scale: [640, 704, 768, 800, 864, 928]
+    zoom_crop_prob: 0.35
+    zoom_crop_ratio: [0.55, 1.0]
+    zoom_crop_min_boxes: 1
+    zoom_crop_min_small_keep: 0
+
+model:
+  num_queries: 300
+  num_feature_levels: 4
+  use_p2: false
+  encoder_feature_indices: null
+  scale_aware_query:
+    enabled: false
+
+loss:
+  small_object_cost_gain: 0.0
+  small_object_loss_gain: 0.0
+
+train:
+  epochs: 200
+  batch_size: 2
+  num_workers: 8
+  lr: 0.00005
+  lr_backbone: 0.000005
+  scheduler: multistep
+  warmup_epochs: 5
+  lr_drop_epochs: [140, 180]
+
+eval:
+  score_thresh: 0.03
+  max_detections: 300

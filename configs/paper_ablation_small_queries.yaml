@@ -1,0 +1,13 @@
+_base_: paper_ablation_highres.yaml
+
+output_dir: outputs/paper_ablation_small_queries
+
+model:
+  num_queries: 900
+  scale_aware_query:
+    enabled: true
+    groups: 3
+    strength: 0.5
+
+eval:
+  max_detections: 500

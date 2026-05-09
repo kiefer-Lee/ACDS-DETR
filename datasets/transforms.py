@@ -51,7 +51,16 @@ def sanitize_boxes(target, min_size=1.0):
     return target
 
 
-def random_zoom_crop(image, target, ratio_range=(0.6, 1.0), min_boxes=1, attempts=10):
+def random_zoom_crop(
+    image,
+    target,
+    ratio_range=(0.6, 1.0),
+    min_boxes=1,
+    attempts=10,
+    small_area_thr=32 * 32,
+    min_small_keep=0,
+    min_visibility=0.35,
+):
     w, h = image.size
     if target["boxes"].numel() == 0:
         return image, target
@@ -67,7 +76,16 @@ def random_zoom_crop(image, target, ratio_range=(0.6, 1.0), min_boxes=1, attempt
         centers_x = (boxes[:, 0] + boxes[:, 2]) * 0.5
         centers_y = (boxes[:, 1] + boxes[:, 3]) * 0.5
         keep = (centers_x >= left) & (centers_x <= left + crop_w) & (centers_y >= top) & (centers_y <= top + crop_h)
+        clipped = boxes.clone()
+        clipped[:, 0::2] = clipped[:, 0::2].clamp(left, left + crop_w)
+        clipped[:, 1::2] = clipped[:, 1::2].clamp(top, top + crop_h)
+        clipped_area = (clipped[:, 2] - clipped[:, 0]).clamp(min=0) * (clipped[:, 3] - clipped[:, 1]).clamp(min=0)
+        visibility = clipped_area / target["area"].clamp(min=1)
+        keep = keep & (visibility >= float(min_visibility))
         if int(keep.sum()) < min_boxes:
+            continue
+        small_keep = keep & (target["area"] < float(small_area_thr))
+        if int(small_keep.sum()) < int(min_small_keep):
             continue
         nt = dict(target)
         nt["boxes"] = boxes[keep].clone()
@@ -97,6 +115,9 @@ def apply_transforms(image, target, train: bool, img_size: int, max_size: int, a
             ratio_range=augment.get("zoom_crop_ratio", [0.6, 1.0]),
             min_boxes=int(augment.get("zoom_crop_min_boxes", 1)),
             attempts=int(augment.get("zoom_crop_attempts", 10)),
+            small_area_thr=float(augment.get("small_area_thr", 32 * 32)),
+            min_small_keep=int(augment.get("zoom_crop_min_small_keep", 0)),
+            min_visibility=float(augment.get("zoom_crop_min_visibility", 0.35)),
         )
     short_size = img_size
     multi_scale = augment.get("multi_scale", [])

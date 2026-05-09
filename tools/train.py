@@ -82,6 +82,28 @@ def checkpoint_meta(cfg, args, best_map, best_ap_small):
     }
 
 
+def build_scheduler(optimizer, cfg):
+    tcfg = cfg["train"]
+    epochs = int(tcfg["epochs"])
+    warmup_epochs = int(tcfg.get("warmup_epochs", 0))
+    scheduler_name = str(tcfg.get("scheduler", "step")).lower()
+    if scheduler_name == "multistep":
+        milestones = [int(m) for m in tcfg.get("lr_drop_epochs", [int(epochs * 0.7), int(epochs * 0.9)])]
+        gamma = float(tcfg.get("lr_drop_gamma", 0.1))
+
+        def lr_lambda(epoch):
+            if warmup_epochs > 0 and epoch < warmup_epochs:
+                return float(epoch + 1) / float(warmup_epochs)
+            factor = 1.0
+            for milestone in milestones:
+                if epoch >= milestone:
+                    factor *= gamma
+            return factor
+
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    return torch.optim.lr_scheduler.StepLR(optimizer, step_size=max(1, epochs // 3), gamma=0.1)
+
+
 def main():
     args = parse_args()
     init_distributed_mode(args)
@@ -121,7 +143,7 @@ def main():
         {"params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad], "lr": cfg["train"]["lr_backbone"]},
     ]
     optimizer = torch.optim.AdamW(param_dicts, lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=max(1, cfg["train"]["epochs"] // 3), gamma=0.1)
+    scheduler = build_scheduler(optimizer, cfg)
     start_epoch = 0
     if cfg["train"].get("resume"):
         ckpt = load_checkpoint(cfg["train"]["resume"], model, optimizer, scheduler, map_location=device)

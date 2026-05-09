@@ -22,7 +22,18 @@ VISDRONE_CLASSES = {
 
 
 class VisDroneDetection(Dataset):
-    def __init__(self, root, split="train", img_size=800, max_size=1333, train=True, min_area=1, max_samples=None, augment=None):
+    def __init__(
+        self,
+        root,
+        split="train",
+        img_size=800,
+        max_size=1333,
+        train=True,
+        min_area=1,
+        max_samples=None,
+        augment=None,
+        strict_bbox=False,
+    ):
         self.root = Path(root)
         self.split = split
         self.img_size = img_size
@@ -30,6 +41,7 @@ class VisDroneDetection(Dataset):
         self.train = train
         self.min_area = min_area
         self.augment = augment or {}
+        self.strict_bbox = strict_bbox
         split_name = "VisDrone2019-DET-train" if split == "train" else "VisDrone2019-DET-val"
         base = self.root / split_name / split_name
         if not base.exists():
@@ -45,10 +57,11 @@ class VisDroneDetection(Dataset):
     def __len__(self):
         return len(self.images)
 
-    def _read_annotation(self, ann_path):
+    def _read_annotation(self, ann_path, image_size):
         boxes, labels, areas, iscrowd = [], [], [], []
         if not ann_path.exists():
             return boxes, labels, areas, iscrowd
+        img_w, img_h = image_size
         with ann_path.open("r", encoding="utf-8") as f:
             for line in f:
                 parts = line.strip().split(",")
@@ -59,11 +72,25 @@ class VisDroneDetection(Dataset):
                 cls = int(float(parts[5]))
                 trunc = int(float(parts[6]))
                 occ = int(float(parts[7]))
-                if score == 0 or cls < 1 or cls > 10 or w * h < self.min_area:
+                if score == 0 or cls < 1 or cls > 10:
                     continue
-                boxes.append([x, y, x + w, y + h])
+                if w <= 0 or h <= 0:
+                    if self.strict_bbox:
+                        raise ValueError(f"Invalid non-positive bbox in {ann_path}: {line.strip()}")
+                    continue
+                x0, y0, x1, y1 = x, y, x + w, y + h
+                cx0, cy0 = max(0.0, x0), max(0.0, y0)
+                cx1, cy1 = min(float(img_w), x1), min(float(img_h), y1)
+                if cx1 <= cx0 or cy1 <= cy0:
+                    if self.strict_bbox:
+                        raise ValueError(f"Invalid out-of-image bbox in {ann_path}: {line.strip()}")
+                    continue
+                area = (cx1 - cx0) * (cy1 - cy0)
+                if area < self.min_area:
+                    continue
+                boxes.append([cx0, cy0, cx1, cy1])
                 labels.append(cls - 1)
-                areas.append(w * h)
+                areas.append(area)
                 iscrowd.append(0)
         return boxes, labels, areas, iscrowd
 
@@ -72,7 +99,7 @@ class VisDroneDetection(Dataset):
         ann_path = self.ann_dir / f"{image_path.stem}.txt"
         image = Image.open(image_path).convert("RGB")
         w, h = image.size
-        boxes, labels, areas, iscrowd = self._read_annotation(ann_path)
+        boxes, labels, areas, iscrowd = self._read_annotation(ann_path, (w, h))
         target = {
             "image_id": torch.tensor([idx], dtype=torch.int64),
             "boxes": torch.as_tensor(boxes, dtype=torch.float32).reshape(-1, 4),

@@ -1,0 +1,13 @@
+_base_: paper_ablation_highres.yaml
+
+output_dir: outputs/paper_ablation_aug
+
+dataset:
+  augment:
+    multi_scale: [896, 960, 1024, 1088, 1152, 1216]
+    zoom_crop_prob: 0.45
+    zoom_crop_ratio: [0.70, 1.0]
+    zoom_crop_min_boxes: 1
+    zoom_crop_min_small_keep: 1
+    zoom_crop_min_visibility: 0.50
+    small_area_thr: 1024

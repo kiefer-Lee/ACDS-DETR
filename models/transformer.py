@@ -66,6 +66,7 @@ class DeformableTransformer(nn.Module):
         self.d_model = d_model
         self.num_layers = cfg["dec_layers"]
         self.return_intermediates = cfg.get("return_intermediates", False)
+        self.encoder_feature_indices = cfg.get("encoder_feature_indices")
         self.encoder_layers = nn.ModuleList([
             EncoderLayer(d_model, cfg["nheads"], cfg["dim_feedforward"], cfg["dropout"])
             for _ in range(cfg["enc_layers"])
@@ -85,8 +86,16 @@ class DeformableTransformer(nn.Module):
         self.reference_points = nn.Linear(d_model, 2)
 
     def forward(self, srcs, masks, pos, query_embed, class_embed, bbox_embed):
+        if self.encoder_feature_indices is None:
+            encoder_indices = list(range(len(srcs)))
+        else:
+            encoder_indices = [int(i) for i in self.encoder_feature_indices]
+        encoder_indices = [i for i in encoder_indices if 0 <= i < len(srcs)]
+        if not encoder_indices:
+            encoder_indices = list(range(len(srcs)))
         flat_src, flat_mask, flat_pos = [], [], []
-        for src, mask, p in zip(srcs, masks, pos):
+        for i in encoder_indices:
+            src, mask, p = srcs[i], masks[i], pos[i]
             flat_src.append(src.flatten(2).transpose(1, 2))
             flat_mask.append(mask.flatten(1))
             flat_pos.append(p.flatten(2).transpose(1, 2))
@@ -95,12 +104,13 @@ class DeformableTransformer(nn.Module):
         memory_pos = torch.cat(flat_pos, dim=1)
         for layer in self.encoder_layers:
             memory = layer(memory, memory_pos, memory_mask)
-        split_sizes = [s.shape[-2] * s.shape[-1] for s in srcs]
+        split_sizes = [srcs[i].shape[-2] * srcs[i].shape[-1] for i in encoder_indices]
         memories = memory.split(split_sizes, dim=1)
-        mem_srcs = []
-        for mem, src in zip(memories, srcs):
+        mem_srcs = list(srcs)
+        for level_idx, mem in zip(encoder_indices, memories):
+            src = srcs[level_idx]
             bs, _, h, w = src.shape
-            mem_srcs.append(mem.transpose(1, 2).view(bs, self.d_model, h, w))
+            mem_srcs[level_idx] = mem.transpose(1, 2).view(bs, self.d_model, h, w)
 
         bs = srcs[0].shape[0]
         query_pos = query_embed.unsqueeze(0).repeat(bs, 1, 1)

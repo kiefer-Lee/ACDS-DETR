@@ -2,7 +2,7 @@ import contextlib
 import io
 
 
-def coco_evaluate(preds, targets, num_classes):
+def coco_evaluate(preds, targets, num_classes, max_detections=100):
     try:
         from pycocotools.coco import COCO
         from pycocotools.cocoeval import COCOeval
@@ -49,11 +49,12 @@ def coco_evaluate(preds, targets, num_classes):
         "categories": [{"id": i + 1, "name": str(i + 1)} for i in range(num_classes)],
     }
     if not detections:
-        return {"mAP": 0.0, "mAP50_95": 0.0, "AP50": 0.0, "AP75": 0.0, "AP_small": 0.0, "AP_medium": 0.0, "AP_large": 0.0, "AR@1": 0.0, "AR@10": 0.0, "AR@100": 0.0, "AR_small": 0.0, "AR_medium": 0.0, "AR_large": 0.0}
+        return {"mAP": 0.0, "mAP50_95": 0.0, "AP50": 0.0, "AP75": 0.0, "AP_small": 0.0, "AP_medium": 0.0, "AP_large": 0.0, "APs": 0.0, "APm": 0.0, "APl": 0.0, "AR@1": 0.0, "AR@10": 0.0, "AR@100": 0.0, "AR_small": 0.0, "AR_medium": 0.0, "AR_large": 0.0, "ARs": 0.0, "ARm": 0.0, "ARl": 0.0}
     with contextlib.redirect_stdout(io.StringIO()):
         coco_gt.createIndex()
         coco_dt = coco_gt.loadRes(detections) if detections else coco_gt.loadRes([])
         evaluator = COCOeval(coco_gt, coco_dt, "bbox")
+        evaluator.params.maxDets = [1, 10, int(max_detections)]
         evaluator.evaluate()
         evaluator.accumulate()
         evaluator.summarize()
@@ -66,10 +67,17 @@ def coco_evaluate(preds, targets, num_classes):
         "AP_small": float(stats[3]),
         "AP_medium": float(stats[4]),
         "AP_large": float(stats[5]),
+        "APs": float(stats[3]),
+        "APm": float(stats[4]),
+        "APl": float(stats[5]),
         "AR@1": float(stats[6]),
         "AR@10": float(stats[7]),
+        f"AR@{int(max_detections)}": float(stats[8]),
         "AR@100": float(stats[8]),
         "AR_small": float(stats[9]),
         "AR_medium": float(stats[10]),
         "AR_large": float(stats[11]),
+        "ARs": float(stats[9]),
+        "ARm": float(stats[10]),
+        "ARl": float(stats[11]),
     }

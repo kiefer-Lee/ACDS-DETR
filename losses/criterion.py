@@ -13,7 +13,15 @@ class SetCriterion(nn.Module):
         super().__init__()
         self.num_classes = cfg["model"]["num_classes"]
         lcfg = cfg["loss"]
-        self.matcher = HungarianMatcher(lcfg["cost_class"], lcfg["cost_bbox"], lcfg["cost_giou"])
+        self.matcher = HungarianMatcher(
+            lcfg["cost_class"],
+            lcfg["cost_bbox"],
+            lcfg["cost_giou"],
+            small_object_cost_gain=lcfg.get("small_object_cost_gain", 0.0),
+            small_area_thr=cfg["acq"].get("small_area_thr", 1024),
+        )
+        self.small_object_loss_gain = float(lcfg.get("small_object_loss_gain", 0.0))
+        self.small_area_thr = float(cfg["acq"].get("small_area_thr", 1024))
         empty_weight = torch.ones(self.num_classes + 1)
         empty_weight[-1] = lcfg["eos_coef"]
         self.register_buffer("empty_weight", empty_weight)
@@ -56,7 +64,7 @@ class SetCriterion(nn.Module):
             num_boxes = num_boxes / dist.get_world_size()
         num_boxes = num_boxes.clamp(min=1).item()
         loss_ce = loss_labels(outputs, targets, indices, num_boxes, self.num_classes, self.empty_weight)
-        loss_bbox, loss_giou = loss_boxes(outputs, targets, indices, num_boxes)
+        loss_bbox, loss_giou = loss_boxes(outputs, targets, indices, num_boxes, self.small_object_loss_gain, self.small_area_thr)
         loss_dict = {"loss_ce": loss_ce, "loss_bbox": loss_bbox, "loss_giou": loss_giou}
         acq_outputs = dict(outputs)
         acq_loss, acq_stats = self.acq(acq_outputs, targets, indices)
@@ -72,7 +80,7 @@ class SetCriterion(nn.Module):
                 continue
             aux_indices = self.matcher(aux, targets)
             l_ce = loss_labels(aux, targets, aux_indices, num_boxes, self.num_classes, self.empty_weight)
-            l_bbox, l_giou = loss_boxes(aux, targets, aux_indices, num_boxes)
+            l_bbox, l_giou = loss_boxes(aux, targets, aux_indices, num_boxes, self.small_object_loss_gain, self.small_area_thr)
             loss_dict[f"loss_ce_{i}"] = l_ce
             loss_dict[f"loss_bbox_{i}"] = l_bbox
             loss_dict[f"loss_giou_{i}"] = l_giou

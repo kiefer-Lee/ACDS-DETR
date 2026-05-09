@@ -743,3 +743,153 @@ python tools/train.py --config configs/exp_acds_full_stable.yaml --seed 42 --gpu
 | S3 | `ablation_sigma_*.yaml` | 开启 | 开启 | collision distance 敏感性 |
 
 只有在相同 seed、相同数据划分、相同训练轮数、相同图像尺度和相同评估阈值下，`AP_small` 与 `AR_small` 同时提升，才建议认为性能提升有效。论文中应同时报告 FPS 和 Params，说明方法收益对应的计算开销。
+---
+
+# 2026-05-09 小目标检测论文级优化补丁说明
+
+本次修改没有删除原 baseline，也没有重写 toy dataloader/trainer/evaluator；仍基于当前 ACDS-DETR 框架、现有 VisDrone loader、Deformable attention CUDA op、Hungarian matcher、COCO-style evaluator 和训练入口做可配置增强。所有新增能力均可通过 config 开启/关闭，baseline 配置保留为 `configs/paper_baseline_original.yaml`。
+
+## 当前项目问题诊断
+
+| 问题 | 位置 | 对 APs/ARs 的影响 | 修复方式 |
+|---|---|---|---|
+| VisDrone 原始 bbox 为 `xywh`，训练需要 `xyxy`，且原实现未裁剪越界框 | `datasets/visdrone.py` | 越界或非法框会污染归一化 bbox、matching 和 COCO 面积统计 | 读取时显式 `xywh -> xyxy`，裁剪到图像边界，过滤非正面积框，提供 `strict_bbox` |
+| category_id 需要从 VisDrone 1-10 映射到 0-based contiguous label | `datasets/visdrone.py` | 类别错位会直接导致分类 AP 接近无效 | 保留并明确 `cls - 1` 映射；COCO eval 导出时再 `label + 1` |
+| Random crop 只保证保留任意 box，可能裁掉大部分小目标或只保留低可见框 | `datasets/transforms.py` | 小目标本来像素少，crop 后易消失，训练形成漏检偏差 | 加入 `zoom_crop_min_small_keep` 和 `zoom_crop_min_visibility` |
+| 默认只用 layer2/layer3/layer4 + 额外 stride32，缺少 stride4 P2 | `models/backbone.py` | 密集小目标纹理和边界信息在高 stride 特征上损失严重 | 新增 `model.use_p2`，可输出 P2/P3/P4/P5/P6 |
+| encoder 是全局 MultiheadAttention，直接加入 P2 会 O(N^2) 爆显存 | `models/transformer.py` | 不能粗暴加高分辨率层，否则 24GB GPU 难以训练 | 新增 `encoder_feature_indices`，full 配置让 P2 只进 deformable decoder cross-attention |
+| query 数量默认 300，对密集小目标召回可能不足 | `models/acds_detr.py` | 多目标图像中 unmatched GT 增多，ARs 受限 | 新增 900 query 配置和 scale-aware query embedding |
+| Hungarian cost 对小目标定位扰动不敏感，IoU 波动导致匹配不稳 | `models/matcher.py`, `losses/*` | 小目标一两个像素误差即可 IoU 大幅下降，正样本分配漂移 | 新增 `small_object_cost_gain` 和 `small_object_loss_gain` |
+| COCO evaluator 默认 maxDets=100，密集小目标图像召回被截断 | `utils/coco_eval.py`, `utils/metrics.py` | ARs 和 APs 在拥挤场景下偏低 | 支持 `eval.max_detections`，输出 `APs/APm/APl/ARs/ARm/ARl` |
+| 缺少系统化数据和漏检诊断工具 | `tools/` | 很难判断是数据、匹配、后处理还是模型漏检 | 新增 `tools/sod_debug.py` 与 `tools/export_predictions.py` |
+
+## 总体优化方案
+
+本次选择 5 条路线：高分辨率特征、密集 query、小目标 matching/loss、增强策略、评估与 debug。它们分别对应复杂场景小目标检测的主要瓶颈：小目标在 stride16/32 上语义可见但定位不可见，密集图中 query 容量不足，小框 IoU 对像素扰动极敏感，crop/resize 会破坏小目标，评估 top-k 过低会低估召回。
+
+关键设计是：P2 进入 decoder 的 multi-scale deformable attention，但默认不进入 vanilla transformer encoder。这让模型获得 stride4 细节，同时避免全局注意力在高分辨率 token 上二次方爆显存。
+
+## 文件修改清单
+
+| 文件 | 作用 |
+|---|---|
+| `datasets/visdrone.py` | 修复 bbox 合法性、越界裁剪、strict 检查 |
+| `datasets/transforms.py` | 小目标友好的 zoom crop 可见性/数量约束 |
+| `datasets/__init__.py` | 透传 `strict_bbox` |
+| `models/backbone.py` | 可配置 P2/P3/P4/P5/P6 输出 |
+| `models/transformer.py` | 可配置 encoder 使用哪些 feature levels |
+| `models/acds_detr.py` | scale-aware query embedding |
+| `models/matcher.py` | small-object-aware matching cost |
+| `losses/criterion.py`, `losses/detr_losses.py` | small-object-aware bbox/GIoU loss reweighting |
+| `tools/train.py` | warmup + multistep scheduler |
+| `utils/coco_eval.py`, `utils/metrics.py`, `engine/evaluator.py` | COCO maxDets 与 APs/ARs 别名 |
+| `tools/sod_debug.py` | bbox 分布、标注可视化、预测可视化、FN 分析 |
+| `tools/export_predictions.py` | 导出 COCO-style detection JSON |
+| `configs/paper_*.yaml` | baseline、消融、full model 可复现实验配置 |
+
+## 实验配置
+
+| 配置 | 内容 | 预期影响 | 风险 |
+|---|---|---|---|
+| `configs/paper_baseline_original.yaml` | 原始结构，800 输入，300 query | 作为论文 baseline | APs/ARs 可能偏低 |
+| `configs/paper_ablation_highres.yaml` | 1024 输入，多尺度到 1152 | 提升小目标像素占比，改善 APs | 显存增加，batch size 降到 1 |
+| `configs/paper_ablation_p2_p3.yaml` | P2/P3/P4/P5/P6，P2 跳过 encoder | 提升小目标边界和定位 | 训练变慢，decoder memory 增加 |
+| `configs/paper_ablation_small_queries.yaml` | 900 query + scale-aware query | 提升密集图 ARs | 误检可能增加，需要调 score/maxDets |
+| `configs/paper_ablation_small_loss.yaml` | 小目标 matching/loss 加权 | 稳定小框匹配和回归 | 权重过大可能牺牲 APm/APl |
+| `configs/paper_ablation_aug.yaml` | 小目标可见性约束 crop + 高分辨率多尺度 | 减少小目标被增强破坏 | crop 过保守会降低增强多样性 |
+| `configs/paper_full_small_object.yaml` | highres + P2 + 900 query + small loss + aug | 优先提升 APs/ARs，保持 overall AP | 显存和训练时间最高 |
+
+## 训练命令
+
+Linux 单卡 4090：
+
+```bash
+cd /data/libaichuan/Projects/SOD/ACDS-DETR
+cd models/ops && sh make.sh && cd ../..
+python tools/train.py --config configs/paper_full_small_object.yaml --gpu 0
+```
+
+Linux 多卡：
+
+```bash
+cd /data/libaichuan/Projects/SOD/ACDS-DETR
+torchrun --nproc_per_node=2 tools/train.py --config configs/paper_full_small_object.yaml
+```
+
+消融实验：
+
+```bash
+python tools/train.py --config configs/paper_baseline_original.yaml --gpu 0
+python tools/train.py --config configs/paper_ablation_highres.yaml --gpu 0
+python tools/train.py --config configs/paper_ablation_p2_p3.yaml --gpu 0
+python tools/train.py --config configs/paper_ablation_small_queries.yaml --gpu 0
+python tools/train.py --config configs/paper_ablation_small_loss.yaml --gpu 0
+python tools/train.py --config configs/paper_ablation_aug.yaml --gpu 0
+python tools/train.py --config configs/paper_full_small_object.yaml --gpu 0
+```
+
+Windows 本地 smoke 可用 `--opts dataset.root=D:/PythonProjects/SOD/Datasets/VisDrone train.num_workers=0 dataset.max_samples=4 train.batch_size=1` 覆盖路径和样本数；正式配置默认使用 Linux 数据路径 `/data/libaichuan/Projects/SOD/Datasets/VisDrone`。
+
+## 验证、测试与 COCO 指标
+
+```bash
+python tools/eval.py --config configs/paper_full_small_object.yaml --checkpoint outputs/paper_full_small_object/best_ap_small.pth --gpu 0
+```
+
+评估会输出 `mAP/AP50/AP75/AP_small/AP_medium/AP_large/APs/APm/APl/ARs/ARm/ARl`。full 配置默认 `score_thresh=0.03`、`max_detections=500`，用于避免密集小目标在后处理中被 top-k 截断。
+
+导出预测并做可视化/FN 分析：
+
+```bash
+python tools/export_predictions.py --config configs/paper_full_small_object.yaml --checkpoint outputs/paper_full_small_object/best_ap_small.pth --output outputs/paper_full_small_object/val_predictions.json --gpu 0
+python tools/sod_debug.py stats --root /data/libaichuan/Projects/SOD/Datasets/VisDrone --split train
+python tools/sod_debug.py vis-ann --root /data/libaichuan/Projects/SOD/Datasets/VisDrone --split val --small-only --output-dir outputs/debug_gt_small
+python tools/sod_debug.py vis-pred --root /data/libaichuan/Projects/SOD/Datasets/VisDrone --split val --predictions outputs/paper_full_small_object/val_predictions.json --output-dir outputs/debug_pred
+python tools/sod_debug.py fn --root /data/libaichuan/Projects/SOD/Datasets/VisDrone --split val --predictions outputs/paper_full_small_object/val_predictions.json --score-thresh 0.03 --iou-thr 0.5
+```
+
+## 代码 Patch 摘要
+
+完整 unified diff 可在仓库中查看：
+
+```bash
+git diff
+git status --short
+```
+
+核心新增参数均在 config 中：
+
+```yaml
+model:
+  use_p2: true
+  num_feature_levels: 5
+  encoder_feature_indices: [1, 2, 3, 4]
+  num_queries: 900
+  scale_aware_query:
+    enabled: true
+    groups: 3
+    strength: 0.5
+loss:
+  small_object_cost_gain: 0.35
+  small_object_loss_gain: 0.75
+dataset:
+  augment:
+    zoom_crop_min_small_keep: 1
+    zoom_crop_min_visibility: 0.50
+eval:
+  score_thresh: 0.03
+  max_detections: 500
+```
+
+## 预期效果与风险排查
+
+高分辨率输入和 P2 主要提升 `APs/ARs`，但会增加显存；若 OOM，先把 `img_size` 降到 960 或把 `num_queries` 降到 600。900 query 主要提升密集小目标召回，但可能增加低分误检；优先观察 `AP50`、`precision` 和 FN 可视化，再微调 `score_thresh`。small-object loss 能稳定小框定位，但过强可能损害中大目标；若 `APm/APl` 明显下降，把 `small_object_loss_gain` 从 `0.75` 降到 `0.35`。增强策略若导致收敛变慢，可把 `zoom_crop_prob` 从 `0.45` 降到 `0.25`。
+
+本地已执行：
+
+```text
+python -m compileall datasets models losses engine tools utils
+python -c "load all paper configs"
+```
+
+注意：当前 Windows 本地 `test.py` 显示 `HAS_MS_DEFORM_ATTN = False`，正式 Linux 训练前必须在服务器执行 `cd models/ops && sh make.sh` 编译 CUDA op。

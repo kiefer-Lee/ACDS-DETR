@@ -10,14 +10,24 @@ from .position_encoding import PositionEmbeddingSine
 
 
 class Backbone(nn.Module):
-    def __init__(self, name="resnet50", pretrained=False, train_backbone=True, hidden_dim=256, num_feature_levels=4, pretrained_path=None):
+    def __init__(
+        self,
+        name="resnet50",
+        pretrained=False,
+        train_backbone=True,
+        hidden_dim=256,
+        num_feature_levels=4,
+        pretrained_path=None,
+        use_p2=False,
+        train_backbone_layers=None,
+    ):
         super().__init__()
         if name == "resnet18":
             backbone = torchvision.models.resnet18(weights=None if not pretrained else "DEFAULT")
-            channels = [128, 256, 512]
+            base_channels = {"layer1": 64, "layer2": 128, "layer3": 256, "layer4": 512}
         elif name == "resnet50":
             backbone = torchvision.models.resnet50(weights=None if not pretrained else "DEFAULT")
-            channels = [512, 1024, 2048]
+            base_channels = {"layer1": 256, "layer2": 512, "layer3": 1024, "layer4": 2048}
         else:
             raise ValueError(f"Unsupported backbone: {name}")
         if pretrained_path:
@@ -28,14 +38,22 @@ class Backbone(nn.Module):
                 state = state["model"]
             cleaned = {k.replace("module.", ""): v for k, v in state.items()}
             backbone.load_state_dict(cleaned, strict=False)
+        if train_backbone_layers is None:
+            train_backbone_layers = ["layer2", "layer3", "layer4"]
+        train_backbone_layers = set(train_backbone_layers)
         for pname, p in backbone.named_parameters():
-            if not train_backbone or ("layer2" not in pname and "layer3" not in pname and "layer4" not in pname):
+            if not train_backbone or not any(layer in pname for layer in train_backbone_layers):
                 p.requires_grad_(False)
-        return_layers = {"layer2": "0", "layer3": "1", "layer4": "2"}
+        stage_names = ["layer1", "layer2", "layer3", "layer4"] if use_p2 else ["layer2", "layer3", "layer4"]
+        if num_feature_levels < len(stage_names):
+            stage_names = stage_names[-num_feature_levels:]
+        return_layers = {name: str(i) for i, name in enumerate(stage_names)}
+        channels = [base_channels[name] for name in stage_names]
         self.body = IntermediateLayerGetter(backbone, return_layers=return_layers)
         self.input_proj = nn.ModuleList([nn.Conv2d(c, hidden_dim, 1) for c in channels])
         self.num_feature_levels = num_feature_levels
-        if num_feature_levels > 3:
+        self.num_body_levels = len(channels)
+        if num_feature_levels > self.num_body_levels:
             self.input_proj.append(nn.Conv2d(channels[-1], hidden_dim, 3, stride=2, padding=1))
         self.position_embedding = PositionEmbeddingSine(hidden_dim // 2)
 
@@ -52,8 +70,8 @@ class Backbone(nn.Module):
             out.append(proj)
             masks.append(m)
             pos.append(self.position_embedding(m))
-        if self.num_feature_levels > 3:
-            proj = self.input_proj[3](last_raw)
+        if self.num_feature_levels > self.num_body_levels:
+            proj = self.input_proj[self.num_body_levels](last_raw)
             m = F.interpolate(mask[:, None].float(), size=proj.shape[-2:]).to(torch.bool)[:, 0]
             out.append(proj)
             masks.append(m)

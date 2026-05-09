@@ -13,11 +13,15 @@ dataset:
   img_size: 800
   max_size: 1333
   min_area: 1
+  strict_bbox: false
   augment:
     multi_scale: [640, 704, 768, 800, 864, 928]
     zoom_crop_prob: 0.35
     zoom_crop_ratio: [0.55, 1.0]
     zoom_crop_min_boxes: 1
+    zoom_crop_min_small_keep: 0
+    zoom_crop_min_visibility: 0.35
+    small_area_thr: 1024
     zoom_crop_attempts: 10
 
 model:
@@ -35,6 +39,13 @@ model:
   backbone: resnet50
   pretrained_backbone: true
   pretrained_backbone_path: null
+  use_p2: false
+  train_backbone_layers: [layer2, layer3, layer4]
+  encoder_feature_indices: null
+  scale_aware_query:
+    enabled: false
+    groups: 3
+    strength: 1.0
 
 acq:
   enabled: true
@@ -64,6 +75,8 @@ loss:
   weight_giou: 2.0
   aux_loss_weight: 0.5
   aux_loss_layers: all
+  small_object_cost_gain: 0.0
+  small_object_loss_gain: 0.0
 
 train:
   epochs: 200
@@ -76,6 +89,10 @@ train:
   print_freq: 1
   val_freq: 10
   amp: true
+  scheduler: step
+  warmup_epochs: 0
+  lr_drop_epochs: [140, 180]
+  lr_drop_gamma: 0.1
   deterministic: false
   benchmark: false
   persistent_workers: true

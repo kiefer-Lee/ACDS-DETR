@@ -73,6 +73,9 @@ class DetectionMetrics:
             "AP_small": float(sum(ap_small_by_thr) / max(1, len(ap_small_by_thr))),
             "AP_medium": float(sum(ap_medium_by_thr) / max(1, len(ap_medium_by_thr))),
             "AP_large": float(sum(ap_large_by_thr) / max(1, len(ap_large_by_thr))),
+            "APs": float(sum(ap_small_by_thr) / max(1, len(ap_small_by_thr))),
+            "APm": float(sum(ap_medium_by_thr) / max(1, len(ap_medium_by_thr))),
+            "APl": float(sum(ap_large_by_thr) / max(1, len(ap_large_by_thr))),
             "precision": float(p50),
             "recall": float(r50),
             "AR@1": self._average_recall(1),
@@ -81,6 +84,9 @@ class DetectionMetrics:
             "AR_small": self._average_recall(100, area_range=(0, self.small_area_thr)),
             "AR_medium": self._average_recall(100, area_range=(self.small_area_thr, 96 * 96)),
             "AR_large": self._average_recall(100, area_range=(96 * 96, float("inf"))),
+            "ARs": self._average_recall(100, area_range=(0, self.small_area_thr)),
+            "ARm": self._average_recall(100, area_range=(self.small_area_thr, 96 * 96)),
+            "ARl": self._average_recall(100, area_range=(96 * 96, float("inf"))),
             **self._dense_subset_metrics(),
         }
 
