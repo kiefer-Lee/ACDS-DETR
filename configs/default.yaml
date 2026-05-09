@@ -89,10 +89,14 @@ train:
   print_freq: 1
   val_freq: 10
   amp: true
-  scheduler: step
-  warmup_epochs: 0
+  scheduler: multistep
+  warmup_epochs: 2
   lr_drop_epochs: [140, 180]
   lr_drop_gamma: 0.1
+  ema:
+    enabled: true
+    decay: 0.9997
+    eval: true
   deterministic: false
   benchmark: false
   persistent_workers: true
@@ -102,8 +106,9 @@ train:
   debug_dir: outputs/debug
 
 eval:
-  score_thresh: 0.05
-  max_detections: 100
+  score_thresh: 0.03
+  max_detections: 300
+  min_detections: 100
   use_coco_eval: true
   iou_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
   dense_small_count_thr: 20

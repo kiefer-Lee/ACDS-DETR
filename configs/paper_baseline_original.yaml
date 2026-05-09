@@ -3,7 +3,7 @@ _base_: default.yaml
 output_dir: outputs/paper_baseline_original
 
 dataset:
-  root: /data/libaichuan/Projects/SOD/Datasets/VisDrone
+  root: ../Datasets/VisDrone
   img_size: 800
   max_size: 1333
   augment:
@@ -38,3 +38,4 @@ train:
 eval:
   score_thresh: 0.03
   max_detections: 300
+  min_detections: 100

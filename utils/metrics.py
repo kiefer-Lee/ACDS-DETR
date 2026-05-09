@@ -4,13 +4,17 @@ from .box_ops import box_cxcywh_to_xyxy, box_iou, denormalize_boxes_xyxy
 
 
 @torch.no_grad()
-def postprocess(outputs, targets, score_thresh=0.05, max_detections=100):
+def postprocess(outputs, targets, score_thresh=0.05, max_detections=100, min_detections=0):
     probs = outputs["pred_logits"].softmax(-1)[..., :-1]
     scores, labels = probs.max(-1)
     boxes = box_cxcywh_to_xyxy(outputs["pred_boxes"]).clamp(0, 1)
     results = []
     for b in range(boxes.shape[0]):
         keep = scores[b] > score_thresh
+        if int(keep.sum()) < int(min_detections):
+            k = min(scores.shape[1], max(int(min_detections), int(max_detections)))
+            keep = torch.zeros_like(scores[b], dtype=torch.bool)
+            keep[scores[b].topk(k).indices] = True
         s = scores[b, keep]
         l = labels[b, keep]
         bx = boxes[b, keep]

@@ -40,7 +40,13 @@ def evaluate(model, criterion, data_loader, device, cfg, logger=None):
         for k, v in loss_dict.items():
             if torch.is_tensor(v):
                 loss_meters.setdefault(k, SmoothedValue()).update(float(v.detach()))
-        preds = postprocess(outputs, targets_dev, cfg["eval"]["score_thresh"], cfg["eval"]["max_detections"])
+        preds = postprocess(
+            outputs,
+            targets_dev,
+            cfg["eval"]["score_thresh"],
+            cfg["eval"]["max_detections"],
+            cfg["eval"].get("min_detections", 0),
+        )
         metrics.update(preds, targets)
     gathered_preds = all_gather_object(metrics.preds)
     gathered_targets = all_gather_object(metrics.targets)

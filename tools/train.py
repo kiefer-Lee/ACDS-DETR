@@ -18,6 +18,7 @@ from losses import build_criterion
 from models import build_model
 from utils.checkpoint import load_checkpoint, save_checkpoint
 from utils.distributed import cleanup_distributed, init_distributed_mode
+from utils.ema import ModelEma
 from utils.logger import setup_logger, write_jsonl
 from utils.misc import apply_overrides, configure_reproducibility, git_summary, is_main_process, load_config, seed_worker
 
@@ -144,9 +145,14 @@ def main():
     ]
     optimizer = torch.optim.AdamW(param_dicts, lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
     scheduler = build_scheduler(optimizer, cfg)
+    model_ema = None
+    if cfg["train"].get("ema", {}).get("enabled", False):
+        model_ema = ModelEma(model, decay=cfg["train"]["ema"].get("decay", 0.9997)).to(device)
     start_epoch = 0
     if cfg["train"].get("resume"):
         ckpt = load_checkpoint(cfg["train"]["resume"], model, optimizer, scheduler, map_location=device)
+        if model_ema is not None and ckpt.get("model_ema") is not None:
+            model_ema.load_state_dict(ckpt["model_ema"])
         start_epoch = int(ckpt.get("epoch", -1)) + 1
         best_map = float(ckpt.get("meta", {}).get("best_map", -1.0))
         best_ap_small = float(ckpt.get("meta", {}).get("best_ap_small", -1.0))
@@ -164,7 +170,18 @@ def main():
     for epoch in range(start_epoch, cfg["train"]["epochs"]):
         if train_sampler is not None:
             train_sampler.set_epoch(epoch)
-        train_stats, elapsed = train_one_epoch(model, criterion, train_loader, optimizer, device, epoch, cfg, scaler, logger if is_main_process() else None)
+        train_stats, elapsed = train_one_epoch(
+            model,
+            criterion,
+            train_loader,
+            optimizer,
+            device,
+            epoch,
+            cfg,
+            scaler,
+            logger if is_main_process() else None,
+            model_ema=model_ema,
+        )
         scheduler.step()
         if is_main_process():
             train_stats["lr"] = optimizer.param_groups[0]["lr"]
@@ -172,25 +189,26 @@ def main():
                 train_stats["max_mem_mb"] = torch.cuda.max_memory_allocated(device) / (1024 ** 2)
             logger.info(f"train epoch={epoch} time={elapsed:.1f}s " + " ".join(f"{k}={v:.4f}" for k, v in train_stats.items() if k.startswith("loss")))
             write_jsonl(out_dir / "train_log.jsonl", {"epoch": epoch, "time": elapsed, **train_stats})
-            save_checkpoint(out_dir / "last.pth", model, optimizer, scheduler, epoch, cfg, checkpoint_meta(cfg, args, best_map, best_ap_small))
+            save_checkpoint(out_dir / "last.pth", model, optimizer, scheduler, epoch, cfg, checkpoint_meta(cfg, args, best_map, best_ap_small), model_ema=model_ema)
         if (epoch + 1) % cfg["train"]["val_freq"] == 0:
-            val_losses, val_metrics = evaluate(model, criterion, val_loader, device, cfg, logger if is_main_process() else None)
+            eval_model = model_ema.module if model_ema is not None and cfg["train"].get("ema", {}).get("eval", True) else model
+            val_losses, val_metrics = evaluate(eval_model, criterion, val_loader, device, cfg, logger if is_main_process() else None)
             if is_main_process():
                 write_jsonl(out_dir / "val_metrics.jsonl", {"epoch": epoch, **val_losses, **val_metrics})
-                save_checkpoint(out_dir / f"epoch_{epoch:03d}.pth", model, optimizer, scheduler, epoch, cfg)
+                save_checkpoint(out_dir / f"epoch_{epoch:03d}.pth", model, optimizer, scheduler, epoch, cfg, model_ema=model_ema)
                 current_map = float(val_metrics.get("mAP", val_metrics.get("mAP50_95", -1.0)))
                 current_ap_small = float(val_metrics.get("AP_small", -1.0))
                 if current_map > best_map:
                     best_map = current_map
                     metrics_summary["best_map"] = best_map
                     metrics_summary["best_epoch_map"] = epoch
-                    save_checkpoint(out_dir / "best_map.pth", model, optimizer, scheduler, epoch, cfg, checkpoint_meta(cfg, args, best_map, best_ap_small))
+                    save_checkpoint(out_dir / "best_map.pth", model, optimizer, scheduler, epoch, cfg, checkpoint_meta(cfg, args, best_map, best_ap_small), model_ema=model_ema)
                 if current_ap_small > best_ap_small:
                     best_ap_small = current_ap_small
                     metrics_summary["best_ap_small"] = best_ap_small
                     metrics_summary["best_epoch_ap_small"] = epoch
-                    save_checkpoint(out_dir / "best_ap_small.pth", model, optimizer, scheduler, epoch, cfg, checkpoint_meta(cfg, args, best_map, best_ap_small))
-                save_checkpoint(out_dir / "last.pth", model, optimizer, scheduler, epoch, cfg, checkpoint_meta(cfg, args, best_map, best_ap_small))
+                    save_checkpoint(out_dir / "best_ap_small.pth", model, optimizer, scheduler, epoch, cfg, checkpoint_meta(cfg, args, best_map, best_ap_small), model_ema=model_ema)
+                save_checkpoint(out_dir / "last.pth", model, optimizer, scheduler, epoch, cfg, checkpoint_meta(cfg, args, best_map, best_ap_small), model_ema=model_ema)
                 with (out_dir / "metrics_summary.json").open("w", encoding="utf-8") as f:
                     json.dump(metrics_summary, f, ensure_ascii=False, indent=2)
     cleanup_distributed()

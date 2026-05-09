@@ -32,7 +32,7 @@ def _save_nan_debug(debug_dir, epoch, iteration, samples, targets, loss_dict, re
     torch.save({"epoch": epoch, "iteration": iteration, "samples": cpu_samples, "targets": cpu_targets, "losses": cpu_losses, "reason": reason}, path)
 
 
-def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, cfg, scaler=None, logger=None):
+def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, cfg, scaler=None, logger=None, model_ema=None):
     model.train()
     criterion.train()
     meters = {}
@@ -91,6 +91,8 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, cfg
                 optimizer.zero_grad(set_to_none=True)
                 continue
             optimizer.step()
+        if model_ema is not None:
+            model_ema.update(model)
         reduced = reduce_dict({k: v.detach() for k, v in loss_dict.items() if torch.is_tensor(v)})
         reduced["loss"] = losses.detach()
         reduced["grad_norm"] = grad_norm.detach() if torch.is_tensor(grad_norm) else torch.as_tensor(grad_norm, device=device)

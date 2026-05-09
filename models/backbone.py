@@ -53,8 +53,12 @@ class Backbone(nn.Module):
         self.input_proj = nn.ModuleList([nn.Conv2d(c, hidden_dim, 1) for c in channels])
         self.num_feature_levels = num_feature_levels
         self.num_body_levels = len(channels)
-        if num_feature_levels > self.num_body_levels:
-            self.input_proj.append(nn.Conv2d(channels[-1], hidden_dim, 3, stride=2, padding=1))
+        extra_levels = max(0, num_feature_levels - self.num_body_levels)
+        self.extra_proj = nn.ModuleList()
+        in_channels = channels[-1]
+        for level in range(extra_levels):
+            self.extra_proj.append(nn.Conv2d(in_channels if level == 0 else hidden_dim, hidden_dim, 3, stride=2, padding=1))
+            in_channels = hidden_dim
         self.position_embedding = PositionEmbeddingSine(hidden_dim // 2)
 
     def forward(self, samples):
@@ -70,10 +74,12 @@ class Backbone(nn.Module):
             out.append(proj)
             masks.append(m)
             pos.append(self.position_embedding(m))
-        if self.num_feature_levels > self.num_body_levels:
-            proj = self.input_proj[self.num_body_levels](last_raw)
+        extra_input = last_raw
+        for conv in self.extra_proj:
+            proj = conv(extra_input)
             m = F.interpolate(mask[:, None].float(), size=proj.shape[-2:]).to(torch.bool)[:, 0]
             out.append(proj)
             masks.append(m)
             pos.append(self.position_embedding(m))
+            extra_input = proj
         return out, masks, pos
