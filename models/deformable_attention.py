@@ -96,6 +96,13 @@ class MultiScaleDeformableAttention(nn.Module):
         else:
             raise ValueError("reference_points last dim must be 2 or 4")
 
+        # The official CUDA op requires value, sampling_locations and
+        # attention_weights to share the same floating dtype. Under AMP the
+        # projected value tensor is fp16 while geometry tensors can remain
+        # fp32, which otherwise raises: expected scalar type Half but found Float.
+        sampling_locations = sampling_locations.to(dtype=value.dtype)
+        attention_weights = attention_weights.to(dtype=value.dtype)
+
         output = MSDeformAttnFunction.apply(
             value,
             spatial_shapes,
