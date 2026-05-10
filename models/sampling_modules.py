@@ -28,17 +28,21 @@ class ReliabilityGuidedScaleSampler(nn.Module):
             gamma = query.new_full(query.shape[:2] + (1,), self.gamma_base)
             rho = query.new_zeros(query.shape[:2] + (1,))
             return gamma, rho
-        wh = pred_boxes[..., 2:4].clamp(min=1e-4)
-        gamma_scale = self.beta * torch.sqrt(wh[..., 0] * wh[..., 1]).unsqueeze(-1)
+        compute_dtype = torch.float32
+        pred_boxes_f = pred_boxes.detach().to(dtype=compute_dtype).nan_to_num(0.5).clamp(0.0, 1.0)
+        wh = pred_boxes_f[..., 2:4].clamp(min=1e-4)
+        gamma_scale = self.beta * torch.sqrt((wh[..., 0] * wh[..., 1]).clamp(min=1e-8)).unsqueeze(-1)
         gamma_scale = gamma_scale.clamp(self.gamma_min, self.gamma_max)
         if self.reliability == "mlp" or pred_logits is None:
             if self.mlp is None:
                 rho = query.new_zeros(query.shape[:2] + (1,))
                 gamma = query.new_full(query.shape[:2] + (1,), self.gamma_base)
                 return gamma, rho
-            rho = torch.sigmoid(self.mlp(query))
+            rho = torch.sigmoid(self.mlp(query.float()))
         else:
-            prob = pred_logits.softmax(-1)[..., :-1]
+            prob = pred_logits.detach().float().softmax(-1)[..., :-1]
             rho = prob.max(-1, keepdim=True).values.detach()
+        rho = rho.nan_to_num(0.0).clamp(0.0, 1.0)
         gamma = (1.0 - rho) * self.gamma_base + rho * gamma_scale
-        return gamma, rho
+        gamma = gamma.nan_to_num(self.gamma_base).clamp(self.gamma_min, self.gamma_max).to(dtype=query.dtype)
+        return gamma, rho.to(dtype=query.dtype)

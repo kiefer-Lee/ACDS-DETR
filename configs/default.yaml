@@ -89,6 +89,9 @@ train:
   print_freq: 1
   val_freq: 10
   amp: true
+  amp_init_scale: 1024
+  amp_growth_interval: 1000
+  amp_backoff_factor: 0.5
   scheduler: multistep
   warmup_epochs: 2
   lr_drop_epochs: [140, 180]
@@ -103,6 +106,7 @@ train:
   prefetch_factor: 2
   resume: null
   skip_nonfinite: true
+  max_consecutive_nonfinite: 20
   debug_dir: outputs/debug
 
 eval:

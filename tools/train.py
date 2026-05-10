@@ -158,7 +158,16 @@ def main():
         best_ap_small = float(ckpt.get("meta", {}).get("best_ap_small", -1.0))
     if args.distributed:
         model = DistributedDataParallel(model, device_ids=[args.local_rank] if device.type == "cuda" else None)
-    scaler = torch.amp.GradScaler("cuda") if cfg["train"]["amp"] and device.type == "cuda" else None
+    scaler = (
+        torch.amp.GradScaler(
+            "cuda",
+            init_scale=float(cfg["train"].get("amp_init_scale", 1024.0)),
+            growth_interval=int(cfg["train"].get("amp_growth_interval", 1000)),
+            backoff_factor=float(cfg["train"].get("amp_backoff_factor", 0.5)),
+        )
+        if cfg["train"]["amp"] and device.type == "cuda"
+        else None
+    )
     out_dir = Path(cfg["output_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
     if is_main_process():

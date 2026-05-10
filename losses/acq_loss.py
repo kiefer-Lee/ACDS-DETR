@@ -18,13 +18,14 @@ class ACQLoss(nn.Module):
         device = outputs["pred_boxes"].device
         if not self.enabled:
             return outputs["pred_boxes"].sum() * 0.0, {"query_collision_rate": torch.tensor(0.0, device=device)}
-        logits = outputs["pred_logits"]
-        boxes = outputs["pred_boxes"]
+        logits = outputs["pred_logits"].float()
+        boxes = outputs["pred_boxes"].float().nan_to_num(0.5).clamp(0.0, 1.0)
         refs = outputs.get("reference_points", None)
         if isinstance(refs, list):
             refs = refs[-1]
         if refs is None:
             refs = boxes[..., :2]
+        refs = refs.float().nan_to_num(0.5).clamp(0.0, 1.0)
         probs = logits.softmax(-1)[..., :-1]
         scores = probs.max(-1).values
         total_loss = boxes.sum() * 0.0
@@ -53,7 +54,7 @@ class ACQLoss(nn.Module):
                 continue
             r_i = refs[b, valid_unmatched, :2]
             r_j = refs[b, matched_small_src, :2]
-            dist = torch.cdist(r_i, r_j, p=2)
+            dist = torch.cdist(r_i, r_j, p=2).nan_to_num(1.0)
             pred_i = box_cxcywh_to_xyxy(boxes[b, valid_unmatched])
             pred_j = box_cxcywh_to_xyxy(boxes[b, matched_small_src])
             iou = box_iou(pred_i, pred_j)[0]
@@ -62,8 +63,9 @@ class ACQLoss(nn.Module):
                 continue
             s_i = scores[b, valid_unmatched][:, None]
             s_j = scores[b, matched_small_src][None, :]
-            m_j = torch.exp(-tgt_area[small_mask][None, :] / (small_thr_norm + 1e-6))
-            collision = s_i * s_j * torch.exp(-dist / self.sigma) * m_j
+            m_j = torch.exp(-tgt_area[small_mask][None, :].float() / (small_thr_norm + 1e-6))
+            collision = s_i * s_j * torch.exp(-dist / max(float(self.sigma), 1e-6)) * m_j
+            collision = collision.nan_to_num(0.0).clamp(0.0, 1.0)
             loss = collision * torch.relu(self.delta - dist)
             total_loss = total_loss + loss[close].mean()
             total_pairs += int(close.sum().item())

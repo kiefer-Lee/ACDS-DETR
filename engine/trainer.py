@@ -39,6 +39,9 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, cfg
     start = time.time()
     end = start
     print_freq = cfg["train"]["print_freq"]
+    consecutive_nonfinite = 0
+    max_consecutive_nonfinite = int(cfg["train"].get("max_consecutive_nonfinite", 20))
+    amp_backoff = float(cfg["train"].get("amp_backoff_factor", 0.5))
     for i, (samples, targets) in enumerate(data_loader):
         data_time = time.time() - end
         samples = move_to_device(samples, device)
@@ -58,39 +61,74 @@ def train_one_epoch(model, criterion, data_loader, optimizer, device, epoch, cfg
             if not cfg["train"].get("skip_nonfinite", True):
                 raise RuntimeError(f"Non-finite training state: {reason}")
             optimizer.zero_grad(set_to_none=True)
+            consecutive_nonfinite += 1
+            if consecutive_nonfinite >= max_consecutive_nonfinite:
+                raise RuntimeError(f"Too many consecutive non-finite batches ({consecutive_nonfinite}); last reason={reason}")
             continue
         optimizer.zero_grad(set_to_none=True)
         if scaler is not None:
             scaler.scale(losses).backward()
+            scaler.unscale_(optimizer)
+            bad_grad = _first_nonfinite_grad(model)
+            if bad_grad is not None:
+                _save_nan_debug(cfg["train"].get("debug_dir", "outputs/debug"), epoch, i, samples, targets, loss_dict, f"nonfinite_grad:{bad_grad}")
+                if logger:
+                    logger.info(f"skip non-finite grad epoch={epoch} iter={i} param={bad_grad} grad_norm=nan amp_scale={scaler.get_scale():.1f}")
+                optimizer.zero_grad(set_to_none=True)
+                try:
+                    scaler.update(new_scale=max(float(scaler.get_scale()) * amp_backoff, 1.0))
+                except TypeError:
+                    scaler.update()
+                consecutive_nonfinite += 1
+                if consecutive_nonfinite >= max_consecutive_nonfinite:
+                    raise RuntimeError(f"Too many consecutive non-finite gradients ({consecutive_nonfinite}); first_bad_param={bad_grad}")
+                continue
             if cfg["train"]["clip_max_norm"] > 0:
-                scaler.unscale_(optimizer)
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["train"]["clip_max_norm"])
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))
-            bad_grad = _first_nonfinite_grad(model)
-            if bad_grad is not None or not torch.isfinite(grad_norm):
+            if not torch.isfinite(grad_norm):
                 _save_nan_debug(cfg["train"].get("debug_dir", "outputs/debug"), epoch, i, samples, targets, loss_dict, f"nonfinite_grad:{bad_grad}")
                 if logger:
-                    logger.info(f"skip non-finite grad epoch={epoch} iter={i} param={bad_grad} grad_norm={float(grad_norm)}")
+                    logger.info(f"skip non-finite grad epoch={epoch} iter={i} param={bad_grad} grad_norm={float(grad_norm)} amp_scale={scaler.get_scale():.1f}")
                 optimizer.zero_grad(set_to_none=True)
-                scaler.update()
+                try:
+                    scaler.update(new_scale=max(float(scaler.get_scale()) * amp_backoff, 1.0))
+                except TypeError:
+                    scaler.update()
+                consecutive_nonfinite += 1
+                if consecutive_nonfinite >= max_consecutive_nonfinite:
+                    raise RuntimeError(f"Too many consecutive non-finite gradient norms ({consecutive_nonfinite})")
                 continue
             scaler.step(optimizer)
             scaler.update()
         else:
             losses.backward()
+            bad_grad = _first_nonfinite_grad(model)
+            if bad_grad is not None:
+                _save_nan_debug(cfg["train"].get("debug_dir", "outputs/debug"), epoch, i, samples, targets, loss_dict, f"nonfinite_grad:{bad_grad}")
+                if logger:
+                    logger.info(f"skip non-finite grad epoch={epoch} iter={i} param={bad_grad} grad_norm=nan")
+                optimizer.zero_grad(set_to_none=True)
+                consecutive_nonfinite += 1
+                if consecutive_nonfinite >= max_consecutive_nonfinite:
+                    raise RuntimeError(f"Too many consecutive non-finite gradients ({consecutive_nonfinite}); first_bad_param={bad_grad}")
+                continue
             if cfg["train"]["clip_max_norm"] > 0:
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["train"]["clip_max_norm"])
             else:
                 grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), float("inf"))
-            bad_grad = _first_nonfinite_grad(model)
-            if bad_grad is not None or not torch.isfinite(grad_norm):
+            if not torch.isfinite(grad_norm):
                 _save_nan_debug(cfg["train"].get("debug_dir", "outputs/debug"), epoch, i, samples, targets, loss_dict, f"nonfinite_grad:{bad_grad}")
                 if logger:
                     logger.info(f"skip non-finite grad epoch={epoch} iter={i} param={bad_grad} grad_norm={float(grad_norm)}")
                 optimizer.zero_grad(set_to_none=True)
+                consecutive_nonfinite += 1
+                if consecutive_nonfinite >= max_consecutive_nonfinite:
+                    raise RuntimeError(f"Too many consecutive non-finite gradient norms ({consecutive_nonfinite})")
                 continue
             optimizer.step()
+        consecutive_nonfinite = 0
         if model_ema is not None:
             model_ema.update(model)
         reduced = reduce_dict({k: v.detach() for k, v in loss_dict.items() if torch.is_tensor(v)})
