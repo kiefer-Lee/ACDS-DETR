@@ -19,14 +19,19 @@ from utils.misc import apply_overrides, load_config, seed_worker
 
 def main():
     parser = argparse.ArgumentParser("Evaluate ACDS-DETR")
-    parser.add_argument("--config", default=str(ROOT / "configs" / "acds_detr_r50_visdrone.yaml"))
+    parser.add_argument("--config", default=None, help="Defaults to checkpoint_dir/config_resolved.yaml when available.")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--gpu", type=int, default=None)
     parser.add_argument("--device", default=None)
     parser.add_argument("--use-ema", action="store_true", help="Evaluate model_ema weights saved in checkpoint when available.")
     parser.add_argument("--opts", nargs="*", default=[])
     args = parser.parse_args()
-    cfg = apply_overrides(load_config(args.config), args.opts)
+    config_path = args.config
+    if config_path is None:
+        resolved = Path(args.checkpoint).resolve().parent / "config_resolved.yaml"
+        config_path = str(resolved if resolved.exists() else ROOT / "configs" / "acds_detr_r50_visdrone.yaml")
+        print(f"using config: {config_path}")
+    cfg = apply_overrides(load_config(config_path), args.opts)
     logger = setup_logger()
     requested = args.device or cfg.get("device", "auto")
     if requested == "auto":

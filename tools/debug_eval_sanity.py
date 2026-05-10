@@ -24,6 +24,8 @@ def summarize_predictions(preds, targets, topk=100):
     max_iou_cls = []
     pred_area = []
     gt_area = []
+    recall_any = {0.3: [0, 0], 0.5: [0, 0], 0.75: [0, 0]}
+    recall_cls = {0.3: [0, 0], 0.5: [0, 0], 0.75: [0, 0]}
     for pred, target in zip(preds, targets):
         boxes = pred["boxes"]
         scores = pred["scores"]
@@ -43,19 +45,32 @@ def summarize_predictions(preds, targets, topk=100):
         if boxes.numel() == 0 or gt_boxes.numel() == 0:
             max_iou_any.append(0.0)
             max_iou_cls.append(0.0)
+            for thr in recall_any:
+                recall_any[thr][1] += int(gt_boxes.shape[0])
+                recall_cls[thr][1] += int(gt_boxes.shape[0])
             continue
         order = scores.sort(descending=True).indices[:topk]
         pboxes = boxes[order]
         plabels = labels[order]
         ious = box_iou(pboxes, gt_boxes)[0]
         max_iou_any.append(float(ious.max()))
+        best_any_per_gt = ious.max(0).values
         cls_best = 0.0
+        best_cls_per_gt = torch.zeros(gt_boxes.shape[0])
         for cls in gt_labels.unique():
             pk = plabels == cls
             gk = gt_labels == cls
             if pk.any() and gk.any():
-                cls_best = max(cls_best, float(box_iou(pboxes[pk], gt_boxes[gk])[0].max()))
+                cls_ious = box_iou(pboxes[pk], gt_boxes[gk])[0]
+                cls_best = max(cls_best, float(cls_ious.max()))
+                gt_idx = gk.nonzero().flatten()
+                best_cls_per_gt[gt_idx] = cls_ious.max(0).values.cpu()
         max_iou_cls.append(cls_best)
+        for thr in recall_any:
+            recall_any[thr][0] += int((best_any_per_gt.cpu() >= thr).sum())
+            recall_any[thr][1] += int(gt_boxes.shape[0])
+            recall_cls[thr][0] += int((best_cls_per_gt >= thr).sum())
+            recall_cls[thr][1] += int(gt_boxes.shape[0])
     def avg(values):
         return sum(values) / max(1, len(values))
     return {
@@ -70,13 +85,19 @@ def summarize_predictions(preds, targets, topk=100):
         "max_iou_same_class_topk": max(max_iou_cls) if max_iou_cls else 0.0,
         "avg_pred_area_topk": avg(pred_area),
         "avg_gt_area": avg(gt_area),
+        "topk_recall_any_iou_0.30": recall_any[0.3][0] / max(1, recall_any[0.3][1]),
+        "topk_recall_any_iou_0.50": recall_any[0.5][0] / max(1, recall_any[0.5][1]),
+        "topk_recall_any_iou_0.75": recall_any[0.75][0] / max(1, recall_any[0.75][1]),
+        "topk_recall_same_class_iou_0.30": recall_cls[0.3][0] / max(1, recall_cls[0.3][1]),
+        "topk_recall_same_class_iou_0.50": recall_cls[0.5][0] / max(1, recall_cls[0.5][1]),
+        "topk_recall_same_class_iou_0.75": recall_cls[0.75][0] / max(1, recall_cls[0.75][1]),
     }
 
 
 @torch.no_grad()
 def main():
     parser = argparse.ArgumentParser("Sanity-check predictions before COCO evaluation")
-    parser.add_argument("--config", default=str(ROOT / "configs" / "paper_full_small_object_stable.yaml"))
+    parser.add_argument("--config", default=None, help="Defaults to checkpoint_dir/config_resolved.yaml when available.")
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--gpu", type=int, default=None)
     parser.add_argument("--device", default=None)
@@ -86,7 +107,12 @@ def main():
     parser.add_argument("--opts", nargs="*", default=[])
     args = parser.parse_args()
 
-    cfg = apply_overrides(load_config(args.config), args.opts)
+    config_path = args.config
+    if config_path is None:
+        resolved = Path(args.checkpoint).resolve().parent / "config_resolved.yaml"
+        config_path = str(resolved if resolved.exists() else ROOT / "configs" / "paper_full_small_object_stable.yaml")
+        print(f"using config: {config_path}")
+    cfg = apply_overrides(load_config(config_path), args.opts)
     requested = args.device or cfg.get("device", "auto")
     if requested == "auto":
         requested = "cuda" if torch.cuda.is_available() else "cpu"
