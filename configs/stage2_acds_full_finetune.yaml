@@ -1,5 +1,5 @@
 seed: 42
-output_dir: outputs/default_4090_acds_full
+output_dir: outputs/stage2_acds_full_finetune
 device: auto
 gpu: null
 distributed: false
@@ -10,12 +10,12 @@ dataset:
   train_split: train
   val_split: val
   num_classes: 10
-  img_size: 1024
-  max_size: 1800
+  img_size: 1088
+  max_size: 1856
   min_area: 1
   strict_bbox: false
   augment:
-    multi_scale: [896, 960, 1024, 1088, 1152]
+    multi_scale: [960, 1024, 1088, 1152, 1216]
     zoom_crop_prob: 0.20
     zoom_crop_ratio: [0.80, 1.0]
     zoom_crop_min_boxes: 1
@@ -79,11 +79,11 @@ loss:
   small_object_loss_gain: 0.35
 
 train:
-  epochs: 160
+  epochs: 120
   batch_size: 1
   num_workers: 8
-  lr: 0.00004
-  lr_backbone: 0.000001
+  lr: 0.000025
+  lr_backbone: 0.0000005
   weight_decay: 0.0001
   clip_max_norm: 0.05
   print_freq: 20
@@ -93,12 +93,12 @@ train:
   amp_growth_interval: 2000
   amp_backoff_factor: 0.5
   scheduler: multistep
-  warmup_epochs: 5
-  lr_drop_epochs: [120, 145]
+  warmup_epochs: 2
+  lr_drop_epochs: [85, 110]
   lr_drop_gamma: 0.1
   ema:
     enabled: true
-    decay: 0.9997
+    decay: 0.9998
     eval: true
   deterministic: false
   benchmark: true

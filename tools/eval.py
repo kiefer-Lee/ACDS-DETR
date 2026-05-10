@@ -29,7 +29,7 @@ def main():
     config_path = args.config
     if config_path is None:
         resolved = Path(args.checkpoint).resolve().parent / "config_resolved.yaml"
-        config_path = str(resolved if resolved.exists() else ROOT / "configs" / "acds_detr_r50_visdrone.yaml")
+        config_path = str(resolved if resolved.exists() else ROOT / "configs" / "default.yaml")
         print(f"using config: {config_path}")
     cfg = apply_overrides(load_config(config_path), args.opts)
     logger = setup_logger()

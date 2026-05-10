@@ -1,8 +1,0 @@
-_base_: exp_acds_full_stable.yaml
-
-output_dir: outputs/ablation_sigma_007
-
-acq:
-  enabled: true
-  sigma: 0.07
-

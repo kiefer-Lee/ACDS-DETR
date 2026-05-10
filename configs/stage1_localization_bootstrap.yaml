@@ -1,5 +1,5 @@
 seed: 42
-output_dir: outputs/default_4090_acds_full
+output_dir: outputs/stage1_localization_bootstrap
 device: auto
 gpu: null
 distributed: false
@@ -15,14 +15,14 @@ dataset:
   min_area: 1
   strict_bbox: false
   augment:
-    multi_scale: [896, 960, 1024, 1088, 1152]
-    zoom_crop_prob: 0.20
-    zoom_crop_ratio: [0.80, 1.0]
+    multi_scale: [960, 1024, 1088]
+    zoom_crop_prob: 0.10
+    zoom_crop_ratio: [0.88, 1.0]
     zoom_crop_min_boxes: 1
     zoom_crop_min_small_keep: 1
-    zoom_crop_min_visibility: 0.65
+    zoom_crop_min_visibility: 0.75
     small_area_thr: 1024
-    zoom_crop_attempts: 12
+    zoom_crop_attempts: 10
 
 model:
   num_classes: 10
@@ -45,11 +45,11 @@ model:
   scale_aware_query:
     enabled: true
     groups: 4
-    strength: 0.35
+    strength: 0.20
 
 acq:
-  enabled: true
-  lambda_acq: 0.03
+  enabled: false
+  lambda_acq: 0.0
   small_area_thr: 1024
   topk_unmatched: 30
   delta: 0.03
@@ -58,7 +58,7 @@ acq:
   apply_last_n_layers: 2
 
 rsnds:
-  enabled: true
+  enabled: false
   beta: 1.0
   gamma_base: 1.0
   gamma_min: 0.35
@@ -68,18 +68,18 @@ rsnds:
 loss:
   eos_coef: 0.1
   cost_class: 2.0
-  cost_bbox: 7.0
-  cost_giou: 3.0
+  cost_bbox: 8.0
+  cost_giou: 4.0
   weight_class: 1.0
-  weight_bbox: 7.0
-  weight_giou: 3.0
+  weight_bbox: 8.0
+  weight_giou: 4.0
   aux_loss_weight: 0.5
   aux_loss_layers: all
-  small_object_cost_gain: 0.20
-  small_object_loss_gain: 0.35
+  small_object_cost_gain: 0.0
+  small_object_loss_gain: 0.0
 
 train:
-  epochs: 160
+  epochs: 45
   batch_size: 1
   num_workers: 8
   lr: 0.00004
@@ -94,7 +94,7 @@ train:
   amp_backoff_factor: 0.5
   scheduler: multistep
   warmup_epochs: 5
-  lr_drop_epochs: [120, 145]
+  lr_drop_epochs: [34, 42]
   lr_drop_gamma: 0.1
   ema:
     enabled: true

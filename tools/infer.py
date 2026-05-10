@@ -17,7 +17,7 @@ from utils.misc import load_config
 
 def main():
     parser = argparse.ArgumentParser("Infer with ACDS-DETR")
-    parser.add_argument("--config", default=str(ROOT / "configs" / "acds_detr_r50_visdrone.yaml"))
+    parser.add_argument("--config", default=str(ROOT / "configs" / "default.yaml"))
     parser.add_argument("--checkpoint", required=True)
     parser.add_argument("--image", required=True)
     parser.add_argument("--gpu", type=int, default=None)
@@ -46,4 +46,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

@@ -1,5 +1,5 @@
 seed: 42
-output_dir: outputs/default_4090_acds_full
+output_dir: outputs/ablation_no_p2
 device: auto
 gpu: null
 distributed: false
@@ -29,7 +29,7 @@ model:
   num_queries: 1000
   hidden_dim: 256
   nheads: 8
-  num_feature_levels: 5
+  num_feature_levels: 4
   enc_layers: 3
   dec_layers: 6
   dim_feedforward: 1024
@@ -39,9 +39,9 @@ model:
   backbone: resnet50
   pretrained_backbone: true
   pretrained_backbone_path: null
-  use_p2: true
+  use_p2: false
   train_backbone_layers: [layer2, layer3, layer4]
-  encoder_feature_indices: [1, 2, 3, 4]
+  encoder_feature_indices: null
   scale_aware_query:
     enabled: true
     groups: 4

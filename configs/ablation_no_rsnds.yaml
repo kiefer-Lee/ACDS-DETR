@@ -1,5 +1,5 @@
 seed: 42
-output_dir: outputs/default_4090_acds_full
+output_dir: outputs/ablation_no_rsnds
 device: auto
 gpu: null
 distributed: false
@@ -58,7 +58,7 @@ acq:
   apply_last_n_layers: 2
 
 rsnds:
-  enabled: true
+  enabled: false
   beta: 1.0
   gamma_base: 1.0
   gamma_min: 0.35

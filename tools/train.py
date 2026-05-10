@@ -25,7 +25,7 @@ from utils.misc import apply_overrides, configure_reproducibility, git_summary, 
 
 def parse_args():
     parser = argparse.ArgumentParser("Train ACDS-DETR")
-    parser.add_argument("--config", default=str(ROOT / "configs" / "acds_detr_r50_visdrone.yaml"))
+    parser.add_argument("--config", default=str(ROOT / "configs" / "default.yaml"))
     parser.add_argument("--output-dir", default=None)
     parser.add_argument("--gpu", type=int, default=None, help="Single GPU id, e.g. 0 or 1. Ignored under torchrun.")
     parser.add_argument("--resume", default=None)

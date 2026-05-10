@@ -1,5 +1,5 @@
 seed: 42
-output_dir: outputs/default_4090_acds_full
+output_dir: outputs/ablation_baseline_deformable
 device: auto
 gpu: null
 distributed: false
@@ -26,10 +26,10 @@ dataset:
 
 model:
   num_classes: 10
-  num_queries: 1000
+  num_queries: 300
   hidden_dim: 256
   nheads: 8
-  num_feature_levels: 5
+  num_feature_levels: 4
   enc_layers: 3
   dec_layers: 6
   dim_feedforward: 1024
@@ -39,17 +39,17 @@ model:
   backbone: resnet50
   pretrained_backbone: true
   pretrained_backbone_path: null
-  use_p2: true
+  use_p2: false
   train_backbone_layers: [layer2, layer3, layer4]
-  encoder_feature_indices: [1, 2, 3, 4]
+  encoder_feature_indices: null
   scale_aware_query:
-    enabled: true
+    enabled: false
     groups: 4
-    strength: 0.35
+    strength: 0.0
 
 acq:
-  enabled: true
-  lambda_acq: 0.03
+  enabled: false
+  lambda_acq: 0.0
   small_area_thr: 1024
   topk_unmatched: 30
   delta: 0.03
@@ -58,7 +58,7 @@ acq:
   apply_last_n_layers: 2
 
 rsnds:
-  enabled: true
+  enabled: false
   beta: 1.0
   gamma_base: 1.0
   gamma_min: 0.35
@@ -75,8 +75,8 @@ loss:
   weight_giou: 3.0
   aux_loss_weight: 0.5
   aux_loss_layers: all
-  small_object_cost_gain: 0.20
-  small_object_loss_gain: 0.35
+  small_object_cost_gain: 0.0
+  small_object_loss_gain: 0.0
 
 train:
   epochs: 160

@@ -1,5 +1,0 @@
-_base_: exp_baseline_stable.yaml
-output_dir: outputs/ablation_baseline
-train:
-  debug_dir: outputs/ablation_baseline/debug
-

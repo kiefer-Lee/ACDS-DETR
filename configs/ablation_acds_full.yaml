@@ -1,5 +1,0 @@
-_base_: exp_acds_full_stable.yaml
-output_dir: outputs/ablation_acds_full
-train:
-  debug_dir: outputs/ablation_acds_full/debug
-
