@@ -17,7 +17,7 @@ def get_tgt_permutation_idx(indices):
 
 
 def loss_labels(outputs, targets, indices, num_boxes, num_classes, empty_weight):
-    src_logits = outputs["pred_logits"]
+    src_logits = outputs["pred_logits"].float()
     idx = get_src_permutation_idx(indices)
     target_classes_o = torch.cat([t["labels"][j] for t, (_, j) in zip(targets, indices)]) if len(idx[0]) else torch.empty(0, dtype=torch.int64, device=src_logits.device)
     target_classes = torch.full(src_logits.shape[:2], num_classes, dtype=torch.int64, device=src_logits.device)
@@ -26,15 +26,28 @@ def loss_labels(outputs, targets, indices, num_boxes, num_classes, empty_weight)
     return F.cross_entropy(src_logits.transpose(1, 2), target_classes, empty_weight)
 
 
+def _stable_cxcywh(boxes, min_wh=1e-3):
+    boxes = boxes.float().nan_to_num(0.5).clamp(0.0, 1.0)
+    xyxy = box_cxcywh_to_xyxy(boxes)
+    xyxy = xyxy.clamp(0.0, 1.0)
+    wh = (xyxy[..., 2:] - xyxy[..., :2]).clamp(min=float(min_wh))
+    center = (xyxy[..., :2] + xyxy[..., 2:]) * 0.5
+    x0y0 = (center - 0.5 * wh).clamp(0.0, 1.0)
+    x1y1 = (center + 0.5 * wh).clamp(0.0, 1.0)
+    return torch.cat([x0y0, x1y1], dim=-1)
+
+
 def loss_boxes(outputs, targets, indices, num_boxes, small_object_loss_gain=0.0, small_area_thr=1024):
     idx = get_src_permutation_idx(indices)
     if len(idx[0]) == 0:
         z = outputs["pred_boxes"].sum() * 0.0
         return z, z
-    src_boxes = outputs["pred_boxes"][idx]
-    target_boxes = torch.cat([t["boxes_norm_cxcywh"][i] for t, (_, i) in zip(targets, indices)], dim=0)
+    src_boxes = outputs["pred_boxes"][idx].float().nan_to_num(0.5).clamp(0.0, 1.0)
+    target_boxes = torch.cat([t["boxes_norm_cxcywh"][i] for t, (_, i) in zip(targets, indices)], dim=0).float().clamp(0.0, 1.0)
     box_loss = F.l1_loss(src_boxes, target_boxes, reduction="none").sum(-1)
-    loss_giou = 1 - torch.diag(generalized_box_iou(box_cxcywh_to_xyxy(src_boxes), box_cxcywh_to_xyxy(target_boxes)))
+    loss_giou = 1 - torch.diag(generalized_box_iou(_stable_cxcywh(src_boxes), _stable_cxcywh(target_boxes)))
+    box_loss = box_loss.nan_to_num(0.0).clamp(max=10.0)
+    loss_giou = loss_giou.nan_to_num(0.0).clamp(min=0.0, max=2.0)
     if small_object_loss_gain > 0:
         target_areas = torch.cat([t["area"][i].to(src_boxes.device) for t, (_, i) in zip(targets, indices)], dim=0)
         weights = 1.0 + float(small_object_loss_gain) * (target_areas < float(small_area_thr)).float()

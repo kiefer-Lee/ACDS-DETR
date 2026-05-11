@@ -40,7 +40,7 @@ model:
   pretrained_backbone: true
   pretrained_backbone_path: null
   use_p2: true
-  train_backbone_layers: [layer2, layer3, layer4]
+  train_backbone_layers: []
   encoder_feature_indices: [1, 2, 3, 4]
   scale_aware_query:
     enabled: true
@@ -68,11 +68,11 @@ rsnds:
 loss:
   eos_coef: 0.1
   cost_class: 2.0
-  cost_bbox: 8.0
-  cost_giou: 4.0
+  cost_bbox: 6.0
+  cost_giou: 2.0
   weight_class: 1.0
-  weight_bbox: 8.0
-  weight_giou: 4.0
+  weight_bbox: 6.0
+  weight_giou: 2.0
   aux_loss_weight: 0.5
   aux_loss_layers: all
   small_object_cost_gain: 0.0
@@ -83,12 +83,12 @@ train:
   batch_size: 1
   num_workers: 8
   lr: 0.00004
-  lr_backbone: 0.000001
+  lr_backbone: 0.0
   weight_decay: 0.0001
   clip_max_norm: 0.05
   print_freq: 20
   val_freq: 5
-  amp: true
+  amp: false
   amp_init_scale: 512
   amp_growth_interval: 2000
   amp_backoff_factor: 0.5

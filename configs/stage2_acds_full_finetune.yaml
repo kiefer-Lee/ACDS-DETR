@@ -40,7 +40,7 @@ model:
   pretrained_backbone: true
   pretrained_backbone_path: null
   use_p2: true
-  train_backbone_layers: [layer2, layer3, layer4]
+  train_backbone_layers: [layer3, layer4]
   encoder_feature_indices: [1, 2, 3, 4]
   scale_aware_query:
     enabled: true
@@ -83,7 +83,7 @@ train:
   batch_size: 1
   num_workers: 8
   lr: 0.000025
-  lr_backbone: 0.0000005
+  lr_backbone: 0.00000025
   weight_decay: 0.0001
   clip_max_norm: 0.05
   print_freq: 20

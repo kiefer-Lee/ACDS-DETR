@@ -139,10 +139,15 @@ def main():
     val_loader = make_loader(val_set, cfg, val_sampler, False, cfg["seed"] + 1000 + getattr(args, "rank", 0))
     model = build_model(cfg).to(device)
     criterion = build_criterion(cfg).to(device)
-    param_dicts = [
-        {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
-        {"params": [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad], "lr": cfg["train"]["lr_backbone"]},
-    ]
+    main_params = [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]
+    backbone_params = [p for n, p in model.named_parameters() if "backbone" in n and p.requires_grad]
+    param_dicts = []
+    if main_params:
+        param_dicts.append({"params": main_params})
+    if backbone_params:
+        param_dicts.append({"params": backbone_params, "lr": cfg["train"]["lr_backbone"]})
+    if not param_dicts:
+        raise RuntimeError("No trainable parameters found. Check model.train_backbone_layers and requires_grad settings.")
     optimizer = torch.optim.AdamW(param_dicts, lr=cfg["train"]["lr"], weight_decay=cfg["train"]["weight_decay"])
     scheduler = build_scheduler(optimizer, cfg)
     model_ema = None
