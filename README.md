@@ -1,454 +1,258 @@
-# ACDS-DETR：面向密集小目标检测的分配感知查询解耦与可靠性引导尺度采样
+# ACDS-DETR: Assignment-aware Collision Decoupling and Reliability-guided Scale-normalized Sampling for Dense Small Object Detection
 
-## 0. 论文级判断
+ACDS-DETR 是一个面向 VisDrone 等密集小目标检测场景的 Deformable DETR 系列模型实现。项目目标不是重新发明 DETR，而是在成熟的多尺度可变形注意力架构上，针对密集小目标中常见的 query 分配冲突、采样偏移失准和小目标召回不足问题，加入可解释、可消融、可可视化的改进模块。
 
-**结论：可以作为论文级 idea，但需要按“机制问题 + 有约束的方法设计 + 可验证证据链”来写。**
+当前代码已经从早期实验原型调整为更接近论文实验的实现：encoder 和 decoder 均基于 Multi-Scale Deformable Attention；服务器上优先使用官方 CUDA op，本地调试时自动回退到 PyTorch `grid_sample` 实现；高分辨率 P2 特征、1000 queries、EMA、AMP、小目标友好评估和两阶段训练策略均已配置。
 
-ACDS-DETR 的核心价值不在于简单堆叠小目标增强技巧，而在于针对 Deformable DETR decoder 侧的两个具体失败模式提出修正：
+## 解决的问题
 
-1. **Query assignment collision**：密集小目标中，多个 object queries 容易围绕同一目标或同一局部区域竞争，导致相邻小目标缺少有效 query 覆盖。
-2. **Scale-insensitive sampling deviation**：deformable attention 的 sampling offsets 缺少对目标尺度和预测可靠性的显式约束，小目标 query 的采样点容易落到背景或邻近目标上。
+密集小目标检测对 DETR 类模型并不友好，主要瓶颈来自三类失败模式：
 
-因此，ACDS-DETR 可以作为一个论文 idea。它的论文表述应聚焦于 **decoder 机制修正**，而不是泛泛地说“提高小目标检测”。核心贡献应限定为：
+1. **Query assignment collision**  
+   在密集区域中，多个 object queries 容易围绕同一个显著目标竞争，而相邻小目标缺少独立 query 覆盖。表面上模型输出了很多候选框，实际 recall 仍被 query 分配质量限制。
 
-- 分配感知的 query collision 建模；
-- 可靠性引导的尺度归一化 deformable sampling；
-- 面向密集小目标的机制验证实验。
+2. **Scale-insensitive sampling deviation**  
+   Deformable attention 的采样偏移由 query feature 自由预测。对小目标而言，采样点只要偏离几个像素，就可能落到背景或邻近目标上，导致分类和定位相互拖累。
 
-## 1. 方法名称
+3. **High-resolution cost explosion**  
+   小目标需要 stride-4/stride-8 高分辨率特征，但普通 Transformer encoder 的全局自注意力会在高分辨率 token 上产生二次复杂度。ACDS-DETR 使用成熟的多尺度可变形注意力 encoder，避免高分辨率输入下的全局 attention 矩阵爆炸。
 
-**ACDS-DETR** 表示：
-
-```text
-Assignment-aware Collision Decoupling and Reliability-guided Scale-normalized Sampling
-```
-
-中文可写为：
+## 模型结构
 
 ```text
-面向密集小目标检测的分配感知查询解耦与可靠性引导尺度采样
+Image
+  -> ResNet backbone
+  -> P2/P3/P4/P5/P6 multi-scale features
+  -> Deformable encoder
+       - encoded levels: P3/P4/P5/P6 by default
+       - P2 is preserved for decoder cross-attention
+  -> Object queries with scale-aware query embeddings
+  -> Deformable decoder
+       - R-SNDS adjusts sampling radius by prediction reliability and box scale
+  -> Classification and box heads
+  -> Hungarian matching
+       - small-object aware matching cost
+       - ACQ collision decoupling loss
+  -> COCO-style and dense-small-object evaluation
 ```
 
-推荐论文题目：
+默认设计保留 P2 进入 decoder cross-attention，但不把 P2 放进 encoder。这样可以让 decoder 使用 stride-4 细节定位小目标，同时避免 encoder 在超高分辨率 token 上消耗过大。
+
+## 创新点
+
+### 1. ACQ: Assignment-aware Collision Decoupling
+
+ACQ 是训练阶段的 query 解耦约束。它不是简单地让所有 query 彼此远离，而是利用 Hungarian matching 结果识别“冗余竞争 query”：
+
+- matched query 负责真实小目标；
+- unmatched 或低质量 query 若在空间上靠近该 matched query，则视为 collision candidate；
+- 只对这些 assignment-aware collision pairs 施加轻量 repulsion。
+
+这种设计的重点是避免误伤真实相邻小目标。密集小目标本来就可能彼此很近，因此普通 query repulsion 容易把合理预测也推开。ACQ 的可发表价值在于：它把 query collision 从一个模糊现象，落到了 matching 后的可度量 pair 集合上，可视化和消融都比较清楚。
+
+相关代码：
+
+- `losses/acq_loss.py`
+- `losses/criterion.py`
+- `models/acds_detr.py`
+
+### 2. R-SNDS: Reliability-guided Scale-normalized Deformable Sampling
+
+R-SNDS 修改 decoder cross-attention 中 sampling offsets 的有效半径：
 
 ```text
-ACDS-DETR: Assignment-aware Collision Decoupling and Reliability-guided Scale-normalized Sampling for Dense Small Object Detection
+gamma_scale = beta * sqrt(w * h)
+rho = max_class_probability
+gamma = (1 - rho) * gamma_base + rho * clip(gamma_scale, gamma_min, gamma_max)
+sampling_location = reference_point + gamma * offset
 ```
 
-## 2. 问题定义
+直觉是：预测还不可靠时，采样范围接近默认值；预测逐渐可靠后，小目标 query 的采样半径会收缩到更符合目标尺度的区域，减少采到背景或邻近目标的概率。该模块不增加采样点数量，推理额外开销很小。
 
-给定基于 Deformable DETR 的检测器，decoder 通过 object queries 和 multi-scale deformable attention 从 encoder memory 中聚合目标特征。对于密集小目标场景，模型容易出现两类 decoder 侧问题。
+相关代码：
 
-### 2.1 Query Assignment Collision
+- `models/sampling_modules.py`
+- `models/transformer.py`
+- `models/deformable_attention.py`
 
-DETR 类方法依赖 Hungarian matching 建立 query 与 ground truth 的一对一匹配。该机制避免了 NMS，但在密集小目标中会出现一种隐性浪费：
+### 3. Mature Deformable Encoder/Decoder Backbone
+
+早期原型中的 encoder 使用普通 `MultiheadAttention`，在高分辨率多尺度 token 上会非常慢，也不符合 Deformable DETR 的成熟实现。当前版本已经替换为 Multi-Scale Deformable Attention：
+
+- CUDA op 可用时自动使用官方扩展；
+- CUDA op 不可用时自动使用 PyTorch fallback，便于 CPU/Windows smoke test；
+- encoder reference points 使用有效区域比例生成，支持 padding mask；
+- decoder 仍保留 ACDS 的 R-SNDS 采样半径调制。
+
+这部分不是论文创新点，应作为可靠工程基础和公平 baseline 的必要条件。
+
+## 创新性与发表判断
+
+ACDS-DETR 的思路具备论文雏形，但是否足以发表取决于实验能否证明以下三点：
+
+1. **性能收益主要来自 ACQ 和 R-SNDS，而不是训练技巧。**  
+   必须给出 baseline、no ACQ、no R-SNDS、no P2、full method 的完整消融。
+
+2. **收益集中体现在小目标和密集小目标。**  
+   建议报告 AP、AP50、AP75、APs、APm、APl、ARs，以及自定义 dense-small subset 的 AP/AR。
+
+3. **机制指标能解释性能提升。**  
+   建议增加 query collision rate、top-k same-class IoU recall、sampling point visualization、reference point distribution 等分析。
+
+如果 full model 只提升整体 mAP，而 ACQ/R-SNDS 消融不明显，则创新点不足以支撑强论文；如果 APs/ARs 和 dense subset 显著提升，并且 collision 与 sampling 可视化能解释提升，则可以支撑一篇小目标检测方向的会议或期刊论文。
+
+## 配置文件
+
+所有主配置均保留服务器 Linux 数据路径：
 
 ```text
-多个高响应 queries 聚集到同一小目标附近
-    ↓
-Hungarian matching 只允许其中一个 query 成为该目标正样本
-    ↓
-其他 query 变成 unmatched 或低质量匹配
-    ↓
-相邻小目标缺少独立 query 覆盖
-    ↓
-AR_small / AP_small 下降
+/data/libaichuan/Projects/SOD/Datasets/VisDrone
 ```
 
-这不是单纯的 query 数量不足，而是 **query 利用率不足**。
+本地验证时不要修改 YAML，使用 `--opts dataset.root=...` 临时覆盖即可。
 
-### 2.2 Scale-insensitive Sampling Deviation
+主要配置：
 
-Deformable attention 为每个 query 预测少量 sampling offsets。该机制高效，但 offsets 主要由 query feature 自由预测，并没有显式感知当前目标尺度和预测可靠性。
+- `configs/paper_full_small_object.yaml`：论文主实验配置，6-layer deformable encoder/decoder，P2/P3/P4/P5/P6，1000 queries，ACQ，R-SNDS，EMA，AMP。
+- `configs/stage1_localization_bootstrap.yaml`：定位启动阶段，关闭 ACQ/R-SNDS，先让模型学到稳定同类定位。
+- `configs/stage2_acds_full_finetune.yaml`：完整 ACDS 微调阶段，从 stage1 权重恢复。
+- `configs/default.yaml`：单阶段完整配置。
+- `configs/ablation_baseline_deformable.yaml`：Deformable-DETR-like baseline。
+- `configs/ablation_no_p2.yaml`、`configs/ablation_no_acq.yaml`、`configs/ablation_no_rsnds.yaml`：关键消融。
+- `configs/smoke_visdrone_mini.yaml`：小规模 smoke test。
 
-对于小目标，目标区域很小，采样点稍微偏移就可能落到背景或邻近目标上：
+## 安装与 CUDA op
 
-```text
-小目标空间范围有限
-    ↓
-采样点偏离目标区域
-    ↓
-attention 特征被背景或邻近目标污染
-    ↓
-分类和定位质量下降
-```
-
-因此，小目标检测不只需要更高分辨率特征，也需要更稳定的 decoder sampling 机制。
-
-## 3. 核心贡献
-
-本文贡献建议写成三点：
-
-1. **提出 Assignment-aware Collision Decoupling，简称 ACQ。**  
-   ACQ 利用 Hungarian assignment 的匹配结果识别冗余竞争 queries，只对“同一小目标附近的冗余 query 响应”施加解耦约束，避免简单 query repulsion 误伤真实相邻目标。
-
-2. **提出 Reliability-guided Scale-normalized Deformable Sampling，简称 R-SNDS。**  
-   R-SNDS 将当前预测框尺度引入 deformable attention 的采样半径，同时使用预测可靠性门控，避免 decoder 早期不可靠 box 过度控制采样范围。
-
-3. **建立面向密集小目标的机制验证协议。**  
-   除 AP / AP_small 外，报告 query collision rate、AR_small、密集区域子集结果和 sampling point 可视化，以证明方法确实缓解 decoder 侧失败模式。
-
-## 4. 整体框架
-
-ACDS-DETR 以 Deformable DETR 为基础，主要修改 decoder 侧：
-
-```text
-输入图像
-    ↓
-Backbone + multi-scale features
-    ↓
-Transformer encoder
-    ↓
-Decoder object queries
-    ↓
-[ACQ] assignment-aware query collision decoupling
-    ↓
-[R-SNDS] reliability-guided scale-normalized sampling
-    ↓
-分类头与边框回归头
-    ↓
-检测结果
-```
-
-其中：
-
-- **ACQ** 是训练阶段的辅助约束，不增加推理开销；
-- **R-SNDS** 修改 decoder cross-attention 的 sampling point 生成方式；
-- P2、高分辨率输入、更多 queries 等属于可选实验配置，不作为核心创新。
-
-## 5. ACQ：分配感知查询碰撞解耦
-
-### 5.1 动机
-
-简单地让所有近距离 queries 相互远离并不合适，因为密集小目标本来就可能彼此非常接近。论文级设计必须区分两种情况：
-
-- 合法情况：两个相邻小目标分别拥有各自匹配 query；
-- 冲突情况：多个 queries 围绕同一个小目标竞争，其中只有一个 query 是有效匹配。
-
-ACQ 的关键是利用 Hungarian matching 结果识别第二种情况。
-
-### 5.2 碰撞对定义
-
-设第 `i` 个 query 在 decoder 第 `t` 层的 reference point 为：
-
-```text
-r_i^t = (x_i^t, y_i^t)
-```
-
-预测框为：
-
-```text
-b_i^t = (x_i^t, y_i^t, w_i^t, h_i^t)
-```
-
-分类置信度为：
-
-```text
-s_i^t = max_c p_i^t(c)
-```
-
-若 query `j` 匹配到小目标 ground truth，query `i` 未匹配或匹配质量较低，并且二者在空间上高度接近，则认为 `(i, j)` 是一个 assignment-aware collision pair。
-
-碰撞 pair 集合 `Omega` 可由以下条件构造：
-
-1. `j` 是 matched small-object query；
-2. `i` 是 unmatched query 或 low-quality matched query；
-3. `IoU(b_i, b_j)` 或 `||r_i - r_j||` 表明二者存在局部竞争；
-4. `s_i` 和 `s_j` 高于置信度阈值。
-
-### 5.3 ACQ 损失
-
-定义小目标权重：
-
-```text
-m_j = exp(-A_j / tau_s)
-```
-
-其中 `A_j` 是目标面积，`tau_s` 是尺度温度。目标越小，`m_j` 越大。
-
-定义 collision score：
-
-```text
-C_ij = s_i s_j exp(-||r_i - r_j||_2 / sigma) m_j
-```
-
-ACQ 损失为：
-
-```text
-L_acq = sum_(i,j in Omega) C_ij max(0, delta - ||r_i - r_j||_2)
-```
-
-最终训练损失：
-
-```text
-L = L_det + lambda_acq L_acq
-```
-
-其中 `L_det` 是 Deformable DETR 原始分类、L1 box 和 GIoU 损失。
-
-### 5.4 为什么不是普通 query repulsion
-
-普通 query repulsion 通常只基于空间距离，容易把真实相邻小目标对应的 queries 也推开。ACQ 的不同点是：
-
-```text
-只约束 assignment 之后被识别为冗余竞争的 query pair，
-保留真实相邻目标对应的合法 matched queries。
-```
-
-这使 ACQ 更符合 DETR 一对一匹配机制，也更容易通过实验解释。
-
-## 6. R-SNDS：可靠性引导尺度归一化采样
-
-### 6.1 动机
-
-Deformable attention 的标准采样形式可写为：
-
-```text
-p_{i,l,k} = r_i + Delta p_{i,l,k}
-```
-
-其中 `r_i` 是 reference point，`Delta p_{i,l,k}` 是第 `l` 个特征层、第 `k` 个采样点的预测偏移。标准机制并不显式限制小目标 query 的采样半径。
-
-直接使用预测框尺度缩放采样偏移也有风险，因为 decoder 早期 box prediction 不稳定。R-SNDS 因此引入可靠性门控。
-
-### 6.2 采样半径
-
-根据当前预测框尺度得到尺度因子：
-
-```text
-gamma_i^scale = clip(beta sqrt(w_i h_i), gamma_min, gamma_max)
-```
-
-定义预测可靠性：
-
-```text
-rho_i = sigmoid(MLP(q_i))
-```
-
-也可以在轻量版本中使用分类置信度近似：
-
-```text
-rho_i = max_c p_i(c)
-```
-
-最终采样因子：
-
-```text
-gamma_i = (1 - rho_i) gamma_base + rho_i gamma_i^scale
-```
-
-新的 sampling point 为：
-
-```text
-p_{i,l,k} = r_i + gamma_i Delta p_{i,l,k}
-```
-
-当预测不可靠时，采样半径接近默认值；当预测可靠时，采样半径更多服从目标尺度。
-
-### 6.3 与 Deformable DETR 的差异
-
-R-SNDS 不增加 sampling point 数量，而是改变已有 offsets 的空间分布：
-
-```text
-标准 Deformable DETR:
-offsets 由 query 自由预测
-
-R-SNDS:
-offsets 由目标尺度归一化，并由预测可靠性门控
-```
-
-因此，它的目标不是扩大模型容量，而是减少小目标 attention 的无效采样。
-
-## 7. 论文风险与应对
-
-### 风险 1：ACQ 被认为只是启发式正则
-
-应对方式：
-
-- 与普通 query repulsion 做对比；
-- 报告 query collision rate；
-- 可视化 ACQ 前后的 reference points；
-- 证明 ACQ 主要提升 `AR_small` 和密集区域召回，而不是无差别影响所有目标。
-
-### 风险 2：R-SNDS 被认为只是手工 scale-aware sampling
-
-应对方式：
-
-- 消融 reliability gate；
-- 比较固定尺度缩放、仅 box 尺度缩放、R-SNDS；
-- 可视化 sampling points；
-- 分析 decoder 早期和后期的采样半径变化。
-
-### 风险 3：工程增强掩盖核心方法
-
-应对方式：
-
-- 核心实验固定 query 数量、backbone、输入尺度和训练 schedule；
-- P2、高分辨率、900 queries 只作为附加实验；
-- 论文主表应先报告纯 ACDS-DETR 对 Deformable DETR 的增益。
-
-## 8. 实验设计
-
-### 8.1 数据集
-
-推荐：
-
-- **COCO 2017**：验证通用检测与 `AP_small`；
-- **VisDrone2019**：验证密集航拍小目标；
-- **AI-TOD**：验证极小目标检测。
-
-### 8.2 对比方法
-
-最低必要对比：
-
-- Deformable DETR；
-- DINO 或 DN-DETR；
-- ACDS-DETR。
-
-可选对比：
-
-- DAB-DETR；
-- Faster R-CNN；
-- RetinaNet；
-- 其他小目标检测方法。
-
-### 8.3 指标
-
-主指标：
-
-- AP；
-- AP50 / AP75；
-- AP_small / AP_medium / AP_large；
-- AR_small；
-- Params；
-- FLOPs；
-- FPS。
-
-机制指标：
-
-- Query Collision Rate；
-- dense-small subset AP / AR；
-- sampling point target-hit ratio；
-- reference point 分布可视化。
-
-### 8.4 消融实验
-
-| ID | ACQ | R-SNDS | 目的 |
-| --- | --- | --- | --- |
-| A0 | 关闭 | 关闭 | Deformable DETR baseline |
-| A1 | 开启 | 关闭 | 验证 assignment-aware collision decoupling |
-| A2 | 关闭 | 开启 | 验证 reliability-guided scale-normalized sampling |
-| A3 | 开启 | 开启 | 验证完整 ACDS-DETR |
-
-必要敏感性实验：
-
-- `lambda_acq`；
-- `delta`；
-- `sigma`；
-- `tau_s`；
-- `gamma_min` / `gamma_max`；
-- `gamma_base`；
-- reliability gate 类型；
-- R-SNDS 作用于全部 decoder layers 或后几层。
-
-## 9. 可选工程增强
-
-以下内容有助于提高小目标实验效果，但不建议写成 ACDS-DETR 的核心创新：
-
-- P2/P3/P4/P5/P6 多尺度特征；
-- 高分辨率输入；
-- 600 或 900 queries；
-- small-object-aware matching cost；
-- small-object-aware loss reweighting；
-- 小目标可见性约束的数据增强；
-- COCO evaluator 的 `maxDets` 调整；
-- FN 分析和预测可视化工具。
-
-论文中可以将这些作为 **implementation details**、**stronger setting** 或 **additional analysis**。如果主方法声称“不增加 query 数量”，主实验就必须保持 query 数量与 baseline 一致；更多 query 只能作为附加实验。
-
-## 10. 预期结果写法
-
-不建议在 README 或论文草稿中写“必然提升 +X AP”。更稳妥的写法是：
-
-```text
-We expect larger gains on AP_small and AR_small than on AP_medium/AP_large,
-because the proposed modules directly target query collision and sampling deviation
-in dense small-object regions.
-```
-
-中文表述：
-
-```text
-如果方法有效，提升应主要体现在 AP_small、AR_small 和密集小目标子集上；
-若整体 AP 提升但机制指标没有改善，则说明收益可能来自训练或配置因素，而不是 ACDS-DETR 的核心设计。
-```
-
-## 11. 项目使用
-
-### 11.1 Smoke Test
+在 Linux 服务器上建议先编译官方 MultiScaleDeformableAttention CUDA op：
 
 ```bash
-python tools/train.py --config configs/acds_detr_smoke_visdrone_mini.yaml
+cd /data/libaichuan/Projects/SOD/ACDS-DETR
+cd models/ops
+sh make.sh
+python test.py
+cd ../..
 ```
 
-### 11.2 核心消融
+如果 op 未编译，代码会自动使用 PyTorch fallback。fallback 适合 smoke test 和调试，不适合正式训练速度评估。
+
+## 推荐训练流程
+
+### 1. 数据与配置诊断
 
 ```bash
-python tools/train.py --config configs/exp_baseline_stable.yaml --gpu 0
-python tools/train.py --config configs/exp_acq_only_stable.yaml --gpu 0
-python tools/train.py --config configs/exp_rsnds_only_stable.yaml --gpu 0
-python tools/train.py --config configs/exp_acds_full_stable.yaml --gpu 0
+python tools/diagnose_project.py \
+  --config configs/paper_full_small_object.yaml
 ```
 
-### 11.3 论文增强配置
+重点检查：
+
+- `max_boxes_per_image` 是否超过 `num_queries`；
+- `eval.max_detections` 是否足够大；
+- 小目标比例是否符合实验目标；
+- bbox 是否越界或面积异常。
+
+### 2. Stage 1: localization bootstrap
 
 ```bash
-python tools/train.py --config configs/paper_baseline_original.yaml --gpu 0
-python tools/train.py --config configs/paper_ablation_highres.yaml --gpu 0
-python tools/train.py --config configs/paper_ablation_p2_p3.yaml --gpu 0
-python tools/train.py --config configs/paper_ablation_small_queries.yaml --gpu 0
-python tools/train.py --config configs/paper_ablation_small_loss.yaml --gpu 0
-python tools/train.py --config configs/paper_ablation_aug.yaml --gpu 0
-python tools/train.py --config configs/paper_full_small_object.yaml --gpu 0
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 tools/train.py \
+  --config configs/stage1_localization_bootstrap.yaml
 ```
 
-### 11.4 评估
+Stage 1 的目标不是最终 AP，而是让 query 先具备可靠定位能力。训练后运行：
 
 ```bash
-python tools/eval.py --config configs/exp_acds_full_stable.yaml --checkpoint outputs/exp_acds_full_stable/last.pth --gpu 0
+python tools/debug_eval_sanity.py \
+  --checkpoint outputs/stage1_localization_bootstrap/best_map.pth \
+  --gpu 0 \
+  --use-ema \
+  --batches 8
 ```
 
-### 11.5 可视化与诊断
+如果 `topk_recall_same_class_iou_0.50` 仍低于 0.03，不建议直接进入 Stage 2，应先检查数据、类别映射、bbox 归一化和学习率。
+
+### 3. Stage 2: full ACDS-DETR fine-tuning
 
 ```bash
-python tools/export_predictions.py --config configs/paper_full_small_object.yaml --checkpoint outputs/paper_full_small_object/best_ap_small.pth --output outputs/paper_full_small_object/val_predictions.json --gpu 0
-python tools/sod_debug.py stats --root /data/libaichuan/Projects/SOD/Datasets/VisDrone --split train
-python tools/sod_debug.py vis-ann --root /data/libaichuan/Projects/SOD/Datasets/VisDrone --split val --small-only --output-dir outputs/debug_gt_small
-python tools/sod_debug.py vis-pred --root /data/libaichuan/Projects/SOD/Datasets/VisDrone --split val --predictions outputs/paper_full_small_object/val_predictions.json --output-dir outputs/debug_pred
-python tools/sod_debug.py fn --root /data/libaichuan/Projects/SOD/Datasets/VisDrone --split val --predictions outputs/paper_full_small_object/val_predictions.json --score-thresh 0.03 --iou-thr 0.5
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 tools/train.py \
+  --config configs/stage2_acds_full_finetune.yaml \
+  --resume outputs/stage1_localization_bootstrap/best_map.pth \
+  --reset-optimizer
 ```
 
-## 12. 最终写作建议
+### 4. Paper full config
 
-ACDS-DETR 的论文叙事应围绕一句话展开：
+如果需要单独跑论文主配置：
 
-```text
-Dense small-object detection in Deformable DETR is limited not only by feature resolution,
-but also by decoder-side query assignment collision and scale-insensitive deformable sampling.
+```bash
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 tools/train.py \
+  --config configs/paper_full_small_object.yaml
 ```
 
-中文可以写成：
+### 5. Final evaluation
 
-```text
-密集小目标检测的瓶颈不只是特征分辨率不足，还包括 decoder 侧 query 分配碰撞和尺度不敏感采样偏移。
+```bash
+python tools/eval.py \
+  --checkpoint outputs/paper_full_small_object/best_ap_small.pth \
+  --gpu 0 \
+  --use-ema
 ```
 
-只要实验能证明：
+## 本地 smoke test
 
-- ACQ 降低 query collision rate；
-- R-SNDS 让 sampling points 更集中于小目标区域；
-- `AP_small` / `AR_small` / dense subset 指标提升明显；
-- 计算开销较小；
-- 对普通 query repulsion 和普通 scale-aware sampling 有优势；
+本地 Windows 或 CPU 环境可以临时覆盖数据路径和模型规模：
 
-那么该方法具备较完整的论文级 idea 形态。
+```bash
+python tools/train.py \
+  --config configs/smoke_visdrone_mini.yaml \
+  --device cpu \
+  --output-dir outputs/local_smoke \
+  --opts dataset.root=../Datasets/VisDroneMini dataset.max_samples=1 \
+         model.hidden_dim=64 model.dim_feedforward=128 \
+         model.num_queries=20 model.num_feature_levels=3 \
+         model.enc_layers=1 model.dec_layers=1 model.nheads=4 \
+         model.use_p2=false model.encoder_feature_indices=null \
+         train.epochs=1 train.num_workers=0 eval.use_coco_eval=false
+```
+
+该测试只验证代码链路，不代表模型性能。
+
+## 建议的论文实验表
+
+主表建议包含：
+
+- AP / AP50 / AP75
+- APs / APm / APl
+- AR@100 / ARs / ARm / ARl
+- Dense_AP_small / Dense_AR_small
+- FPS / Params
+
+消融建议包含：
+
+- baseline Deformable DETR
+- baseline + P2
+- baseline + ACQ
+- baseline + R-SNDS
+- full ACDS-DETR
+- full without ACQ
+- full without R-SNDS
+- full without P2
+
+机制分析建议包含：
+
+- ACQ 前后的 query collision rate；
+- top-k same-class IoU recall；
+- reference points 分布；
+- R-SNDS 前后的 sampling point 可视化；
+- dense-small subset 上的 recall 改善。
+
+## 工程注意事项
+
+- 正式训练必须编译 CUDA op，否则 fallback 会明显慢。
+- `grad_norm` 是裁剪前梯度范数，不能直接等同于实际更新幅度。
+- 如果出现连续 non-finite gradient，应停止该次训练，不建议从连续 skip 后的 `last.pth` 恢复。
+- VisDrone 原始类别为 1-10，训练内部映射为 0-9，COCO-style eval 会再映射回 1-10。
+- 小目标评估中 `max_detections` 不应过小，默认主配置使用 500。
+
+## 当前定位
+
+ACDS-DETR 当前更适合作为“可验证的论文方法原型”，而不是已经完成调参的 SOTA 结果包。代码已替换掉早期不适合高分辨率训练的全局 encoder，并保留了可发表所需的模块化消融入口。下一步应集中在服务器上完成 baseline/full/ablation 的稳定训练和机制可视化，只有当这些实验闭环成立时，ACDS-DETR 才能被严肃地包装成论文贡献。

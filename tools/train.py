@@ -33,6 +33,7 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default=None, help="auto, cpu, cuda, or cuda:N")
+    parser.add_argument("--reset-optimizer", action="store_true", help="Load model weights from --resume but rebuild optimizer/scheduler.")
     parser.add_argument("--opts", nargs="*", default=[], help="Override config values, e.g. train.lr=1e-4 acq.enabled=false")
     return parser.parse_args()
 
@@ -114,6 +115,8 @@ def main():
         cfg["output_dir"] = args.output_dir
     if args.resume:
         cfg["train"]["resume"] = args.resume
+    if args.reset_optimizer:
+        cfg["train"]["reset_optimizer_on_resume"] = True
     if args.epochs is not None:
         cfg["train"]["epochs"] = args.epochs
     if args.batch_size is not None:
@@ -155,12 +158,26 @@ def main():
         model_ema = ModelEma(model, decay=cfg["train"]["ema"].get("decay", 0.9997)).to(device)
     start_epoch = 0
     if cfg["train"].get("resume"):
-        ckpt = load_checkpoint(cfg["train"]["resume"], model, optimizer, scheduler, map_location=device)
+        reset_optim = bool(cfg["train"].get("reset_optimizer_on_resume", False))
+        ckpt = load_checkpoint(
+            cfg["train"]["resume"],
+            model,
+            None if reset_optim else optimizer,
+            None if reset_optim else scheduler,
+            map_location=device,
+        )
         if model_ema is not None and ckpt.get("model_ema") is not None:
             model_ema.load_state_dict(ckpt["model_ema"])
-        start_epoch = int(ckpt.get("epoch", -1)) + 1
-        best_map = float(ckpt.get("meta", {}).get("best_map", -1.0))
-        best_ap_small = float(ckpt.get("meta", {}).get("best_ap_small", -1.0))
+        if reset_optim:
+            start_epoch = int(cfg["train"].get("reset_start_epoch", 0))
+            best_map = -1.0
+            best_ap_small = -1.0
+            if is_main_process():
+                logger.info("Loaded model weights and reset optimizer/scheduler.")
+        else:
+            start_epoch = int(ckpt.get("epoch", -1)) + 1
+            best_map = float(ckpt.get("meta", {}).get("best_map", -1.0))
+            best_ap_small = float(ckpt.get("meta", {}).get("best_ap_small", -1.0))
     if args.distributed:
         model = DistributedDataParallel(model, device_ids=[args.local_rank] if device.type == "cuda" else None)
     scaler = (

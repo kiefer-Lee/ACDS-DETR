@@ -1,0 +1,118 @@
+seed: 42
+output_dir: outputs/paper_full_small_object
+device: auto
+gpu: null
+distributed: false
+
+dataset:
+  name: visdrone
+  root: /data/libaichuan/Projects/SOD/Datasets/VisDrone
+  train_split: train
+  val_split: val
+  num_classes: 10
+  img_size: 1088
+  max_size: 1856
+  min_area: 1
+  strict_bbox: false
+  augment:
+    multi_scale: [960, 1024, 1088, 1152, 1216]
+    zoom_crop_prob: 0.20
+    zoom_crop_ratio: [0.80, 1.0]
+    zoom_crop_min_boxes: 1
+    zoom_crop_min_small_keep: 1
+    zoom_crop_min_visibility: 0.65
+    small_area_thr: 1024
+    zoom_crop_attempts: 12
+
+model:
+  num_classes: 10
+  num_queries: 1000
+  hidden_dim: 256
+  nheads: 8
+  num_feature_levels: 5
+  enc_layers: 6
+  dec_layers: 6
+  dim_feedforward: 1024
+  dropout: 0.1
+  num_points: 4
+  return_intermediates: true
+  backbone: resnet50
+  pretrained_backbone: true
+  pretrained_backbone_path: null
+  use_p2: true
+  train_backbone_layers: [layer3, layer4]
+  encoder_feature_indices: [1, 2, 3, 4]
+  scale_aware_query:
+    enabled: true
+    groups: 4
+    strength: 0.35
+
+acq:
+  enabled: true
+  lambda_acq: 0.03
+  small_area_thr: 1024
+  topk_unmatched: 30
+  delta: 0.03
+  sigma: 0.06
+  min_score: 0.40
+  apply_last_n_layers: 2
+
+rsnds:
+  enabled: true
+  beta: 1.0
+  gamma_base: 1.0
+  gamma_min: 0.35
+  gamma_max: 1.25
+  reliability: cls_conf
+
+loss:
+  eos_coef: 0.1
+  cost_class: 2.0
+  cost_bbox: 7.0
+  cost_giou: 3.0
+  weight_class: 1.0
+  weight_bbox: 7.0
+  weight_giou: 3.0
+  aux_loss_weight: 0.5
+  aux_loss_layers: all
+  small_object_cost_gain: 0.20
+  small_object_loss_gain: 0.35
+
+train:
+  epochs: 150
+  batch_size: 1
+  num_workers: 8
+  lr: 0.000025
+  lr_backbone: 0.00000025
+  weight_decay: 0.0001
+  clip_max_norm: 0.05
+  print_freq: 20
+  val_freq: 5
+  amp: true
+  amp_init_scale: 512
+  amp_growth_interval: 2000
+  amp_backoff_factor: 0.5
+  scheduler: multistep
+  warmup_epochs: 2
+  lr_drop_epochs: [105, 135]
+  lr_drop_gamma: 0.1
+  ema:
+    enabled: true
+    decay: 0.9998
+    eval: true
+  deterministic: false
+  benchmark: true
+  persistent_workers: true
+  prefetch_factor: 2
+  resume: null
+  skip_nonfinite: true
+  max_consecutive_nonfinite: 10
+  debug_dir: outputs/debug
+
+eval:
+  score_thresh: 0.01
+  max_detections: 500
+  min_detections: 200
+  use_coco_eval: true
+  iou_thresholds: [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+  dense_small_count_thr: 20

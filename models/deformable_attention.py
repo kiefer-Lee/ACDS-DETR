@@ -1,14 +1,18 @@
+import math
 import warnings
 
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch.nn.init import constant_, xavier_uniform_
 
 try:
-    from models.ops.functions.ms_deform_attn_func import MSDeformAttnFunction
-    HAS_MS_DEFORM_ATTN = True
+    from models.ops.functions.ms_deform_attn_func import MSDA, MSDeformAttnFunction, ms_deform_attn_core_pytorch
+    HAS_MS_DEFORM_ATTN = MSDA is not None
 except Exception as exc:
+    MSDA = None
     MSDeformAttnFunction = None
+    ms_deform_attn_core_pytorch = None
     HAS_MS_DEFORM_ATTN = False
     _IMPORT_ERROR = exc
 
@@ -24,12 +28,6 @@ class MultiScaleDeformableAttention(nn.Module):
         super().__init__()
         if d_model % n_heads != 0:
             raise ValueError("d_model must be divisible by n_heads")
-        if not HAS_MS_DEFORM_ATTN:
-            raise ImportError(
-                "Official MSDeformAttn CUDA op is unavailable. "
-                "Compile it with: cd models/ops && sh make.sh && python test.py"
-            ) from _IMPORT_ERROR
-
         self.d_model = d_model
         self.n_heads = n_heads
         self.n_levels = n_levels
@@ -42,9 +40,29 @@ class MultiScaleDeformableAttention(nn.Module):
         self.value_proj = nn.Linear(d_model, d_model)
         self.output_proj = nn.Linear(d_model, d_model)
         self.dropout = nn.Dropout(dropout)
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        constant_(self.sampling_offsets.weight.data, 0.0)
+        thetas = torch.arange(self.n_heads, dtype=torch.float32) * (2.0 * math.pi / self.n_heads)
+        grid = torch.stack([thetas.cos(), thetas.sin()], -1)
+        grid = (grid / grid.abs().max(-1, keepdim=True)[0]).view(self.n_heads, 1, 1, 2)
+        grid = grid.repeat(1, self.n_levels, self.n_points, 1)
+        for point_idx in range(self.n_points):
+            grid[:, :, point_idx, :] *= point_idx + 1
+        with torch.no_grad():
+            self.sampling_offsets.bias.copy_(grid.view(-1))
+        constant_(self.attention_weights.weight.data, 0.0)
+        constant_(self.attention_weights.bias.data, 0.0)
+        xavier_uniform_(self.value_proj.weight.data)
+        constant_(self.value_proj.bias.data, 0.0)
+        xavier_uniform_(self.output_proj.weight.data)
+        constant_(self.output_proj.bias.data, 0.0)
 
     def forward(self, query, srcs, masks, reference_points, gamma=None):
         bs, num_queries, _ = query.shape
+        if len(srcs) != self.n_levels:
+            raise ValueError(f"Expected {self.n_levels} feature levels, got {len(srcs)}")
 
         value_list = []
         mask_list = []
@@ -84,10 +102,18 @@ class MultiScaleDeformableAttention(nn.Module):
 
         if reference_points.shape[-1] == 2:
             normalizer = torch.stack([spatial_shapes[:, 1], spatial_shapes[:, 0]], dim=-1)
-            sampling_locations = (
-                reference_points[:, :, None, None, None, :]
-                + offsets / normalizer[None, None, None, :, None, :]
-            )
+            if reference_points.dim() == 3:
+                sampling_locations = (
+                    reference_points[:, :, None, None, None, :]
+                    + offsets / normalizer[None, None, None, :, None, :]
+                )
+            elif reference_points.dim() == 4:
+                sampling_locations = (
+                    reference_points[:, :, None, :, None, :]
+                    + offsets / normalizer[None, None, None, :, None, :]
+                )
+            else:
+                raise ValueError("2D reference_points must have shape [B, Q, 2] or [B, Q, L, 2]")
         elif reference_points.shape[-1] == 4:
             sampling_locations = (
                 reference_points[:, :, None, None, None, :2]
@@ -103,13 +129,30 @@ class MultiScaleDeformableAttention(nn.Module):
         sampling_locations = sampling_locations.to(dtype=value.dtype)
         attention_weights = attention_weights.to(dtype=value.dtype)
 
-        output = MSDeformAttnFunction.apply(
-            value,
-            spatial_shapes,
-            level_start_index,
-            sampling_locations,
-            attention_weights,
-            self.im2col_step,
-        )
+        if HAS_MS_DEFORM_ATTN and value.is_cuda:
+            output = MSDeformAttnFunction.apply(
+                value,
+                spatial_shapes,
+                level_start_index,
+                sampling_locations,
+                attention_weights,
+                self.im2col_step,
+            )
+        else:
+            if ms_deform_attn_core_pytorch is None:
+                raise ImportError(
+                    "MSDeformAttn fallback is unavailable. Check models/ops/functions/ms_deform_attn_func.py"
+                ) from globals().get("_IMPORT_ERROR")
+            if value.is_cuda:
+                warnings.warn(
+                    "Using the PyTorch MSDeformAttn fallback on CUDA. Compile models/ops for paper-level speed.",
+                    RuntimeWarning,
+                )
+            output = ms_deform_attn_core_pytorch(
+                value.float(),
+                spatial_shapes,
+                sampling_locations.float(),
+                attention_weights.float(),
+            ).to(dtype=value.dtype)
         output = self.output_proj(output)
         return self.dropout(output), sampling_locations.detach(), attention_weights.detach()
