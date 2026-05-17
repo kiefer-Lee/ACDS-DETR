@@ -49,7 +49,7 @@ model:
 
 acq:
   enabled: true
-  lambda_acq: 0.03
+  lambda_acq: 0.04
   small_area_thr: 1024
   topk_unmatched: 30
   delta: 0.03
@@ -75,15 +75,15 @@ loss:
   weight_giou: 3.0
   aux_loss_weight: 0.5
   aux_loss_layers: all
-  small_object_cost_gain: 0.20
-  small_object_loss_gain: 0.35
+  small_object_cost_gain: 0.35
+  small_object_loss_gain: 0.60
 
 train:
-  epochs: 120
+  epochs: 30
   batch_size: 1
   num_workers: 8
-  lr: 0.000025
-  lr_backbone: 0.00000025
+  lr: 0.000015
+  lr_backbone: 0.000001
   weight_decay: 0.0001
   clip_max_norm: 0.05
   print_freq: 20
@@ -94,7 +94,7 @@ train:
   amp_backoff_factor: 0.5
   scheduler: multistep
   warmup_epochs: 2
-  lr_drop_epochs: [85, 110]
+  lr_drop_epochs: [20, 27]
   lr_drop_gamma: 0.1
   ema:
     enabled: true
