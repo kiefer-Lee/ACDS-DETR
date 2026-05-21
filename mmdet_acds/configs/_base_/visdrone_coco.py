@@ -1,6 +1,6 @@
 custom_imports = dict(imports=["mmdet_acds"], allow_failed_imports=False)
 
-data_root = "D:/PythonProjects/SOD/Datasets/VisDrone/"
+data_root = "/data/libaichuan/Projects/SOD/Datasets/VisDrone/"
 visdrone_classes = (
     "pedestrian",
     "people",
