@@ -15,9 +15,9 @@ visdrone_classes = (
 )
 metainfo = dict(classes=visdrone_classes)
 
-img_size = 1088
-max_size = 1856
-train_scales = [(max_size, s) for s in [960, 1024, 1088, 1152, 1216]]
+img_size = 1024
+max_size = 1600
+train_scales = [(max_size, img_size) ]
 
 train_pipeline = [
     dict(type="LoadImageFromFile", backend_args=None),
@@ -45,8 +45,8 @@ test_pipeline = [
 ]
 
 train_dataloader = dict(
-    batch_size=1,
-    num_workers=8,
+    batch_size=3,
+    num_workers=12,
     persistent_workers=True,
     sampler=dict(type="DefaultSampler", shuffle=True),
     batch_sampler=dict(type="AspectRatioBatchSampler"),
@@ -62,8 +62,8 @@ train_dataloader = dict(
 )
 
 val_dataloader = dict(
-    batch_size=1,
-    num_workers=2,
+    batch_size=3,
+    num_workers=12,
     persistent_workers=True,
     drop_last=False,
     sampler=dict(type="DefaultSampler", shuffle=False),
