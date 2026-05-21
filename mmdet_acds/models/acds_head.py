@@ -94,8 +94,15 @@ class ACDSDeformableDETRHead(_MMDetDeformableDETRHead):
         losses = super().loss_by_feat(*args, **kwargs)
         all_layers_cls_scores = args[0] if args else kwargs["all_layers_cls_scores"]
         all_layers_bbox_preds = args[1] if len(args) > 1 else kwargs["all_layers_bbox_preds"]
-        batch_gt_instances = args[2] if len(args) > 2 else kwargs["batch_gt_instances"]
-        batch_img_metas = args[3] if len(args) > 3 else kwargs["batch_img_metas"]
+        if len(args) >= 6:
+            # mmdet 3.x DeformableDETRHead passes:
+            # cls, bbox, enc_cls, enc_bbox, batch_gt_instances, batch_img_metas.
+            batch_gt_instances = args[4]
+            batch_img_metas = args[5]
+        else:
+            # Keep compatibility with DETRHead-style calls and keyword tests.
+            batch_gt_instances = args[2] if len(args) > 2 else kwargs["batch_gt_instances"]
+            batch_img_metas = args[3] if len(args) > 3 else kwargs["batch_img_metas"]
         refs = kwargs.get("all_layers_reference_points")
 
         n = max(1, min(self.acq_apply_last_n_layers, int(all_layers_cls_scores.shape[0])))
