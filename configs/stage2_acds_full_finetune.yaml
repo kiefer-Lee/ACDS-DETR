@@ -80,8 +80,8 @@ loss:
 
 train:
   epochs: 30
-  batch_size: 1
-  num_workers: 8
+  batch_size: 3
+  num_workers: 12
   lr: 0.000015
   lr_backbone: 0.000001
   weight_decay: 0.0001
