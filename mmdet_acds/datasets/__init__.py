@@ -1,0 +1,4 @@
+from .visdrone_metainfo import VISDRONE_CLASSES, VISDRONE_METAINFO
+
+__all__ = ["VISDRONE_CLASSES", "VISDRONE_METAINFO"]
+
