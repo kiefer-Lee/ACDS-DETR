@@ -22,7 +22,10 @@ param_scheduler = [
     dict(type="LinearLR", start_factor=0.001, by_epoch=False, begin=0, end=1000),
     dict(type="MultiStepLR", by_epoch=True, milestones=[34, 42], gamma=0.1),
 ]
-custom_hooks = [dict(type="EMAHook", momentum=0.0003, priority=49)]
+custom_hooks = [
+    dict(type="EMAHook", momentum=0.0003, priority=49),
+    dict(type="MetricCurveHook", priority=90),
+]
 load_from = None
 resume = False
 

@@ -15,5 +15,8 @@ param_scheduler = [
     dict(type="MultiStepLR", by_epoch=True, milestones=[105, 135], gamma=0.1),
 ]
 
-custom_hooks = [dict(type="EMAHook", momentum=0.0002, priority=49)]
+custom_hooks = [
+    dict(type="EMAHook", momentum=0.0002, priority=49),
+    dict(type="MetricCurveHook", priority=90),
+]
 
