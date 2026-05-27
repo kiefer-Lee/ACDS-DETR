@@ -1,4 +1,4 @@
-train_cfg = dict(type="EpochBasedTrainLoop", max_epochs=150, val_interval=30)
+train_cfg = dict(type="EpochBasedTrainLoop", max_epochs=150, val_interval=5)
 val_cfg = dict(type="ValLoop")
 test_cfg = dict(type="TestLoop")
 
