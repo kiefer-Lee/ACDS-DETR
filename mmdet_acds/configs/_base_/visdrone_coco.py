@@ -1,6 +1,11 @@
 custom_imports = dict(imports=["mmdet_acds"], allow_failed_imports=False)
 
-data_root = "/data/libaichuan/Projects/SOD/Datasets/VisDrone/"
+data_root = "/root/blockdata/Datasets/VisDrone/"
+data_root = data_root if data_root.endswith(("/", "\\")) else data_root + "/"
+train_ann_file = "annotations/train.json"
+val_ann_file = "annotations/val.json"
+train_img_prefix = "VisDrone2019-DET-train/VisDrone2019-DET-train/images/"
+val_img_prefix = "VisDrone2019-DET-val/VisDrone2019-DET-val/images/"
 visdrone_classes = (
     "pedestrian",
     "people",
@@ -53,8 +58,8 @@ train_dataloader = dict(
     dataset=dict(
         type="CocoDataset",
         data_root=data_root,
-        ann_file="annotations/train.json",
-        data_prefix=dict(img="VisDrone2019-DET-train/VisDrone2019-DET-train/images/"),
+        ann_file=train_ann_file,
+        data_prefix=dict(img=train_img_prefix),
         metainfo=metainfo,
         filter_cfg=dict(filter_empty_gt=False, min_size=1),
         pipeline=train_pipeline,
@@ -70,8 +75,8 @@ val_dataloader = dict(
     dataset=dict(
         type="CocoDataset",
         data_root=data_root,
-        ann_file="annotations/val.json",
-        data_prefix=dict(img="VisDrone2019-DET-val/VisDrone2019-DET-val/images/"),
+        ann_file=val_ann_file,
+        data_prefix=dict(img=val_img_prefix),
         metainfo=metainfo,
         test_mode=True,
         pipeline=test_pipeline,
@@ -81,7 +86,7 @@ test_dataloader = val_dataloader
 
 val_evaluator = dict(
     type="CocoMetric",
-    ann_file=data_root + "annotations/val.json",
+    ann_file=data_root + val_ann_file,
     metric="bbox",
     proposal_nums=(100, 300, 500),
 )

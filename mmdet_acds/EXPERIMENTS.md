@@ -5,8 +5,8 @@ Run commands from the `ACDS-DETR` directory.
 ```bash
 cd /data/libaichuan/Projects/SOD/ACDS-DETR
 export PYTHONPATH=$PWD:$PYTHONPATH
-export DATA_ROOT=/data/libaichuan/Projects/SOD/Datasets/VisDrone
-export GPUS=2
+DATA_ROOT=/root/blockdata/Datasets/VisDrone
+GPUS=2
 ```
 
 If COCO-format annotations are missing, generate them first:
