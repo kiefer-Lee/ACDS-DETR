@@ -59,14 +59,16 @@ model = dict(
             self_attn_cfg=dict(
                 embed_dims=embed_dims,
                 num_heads=8,
-                dropout=0.0,
+                attn_drop=0.0,
+                proj_drop=0.0,
                 batch_first=True,
                 cross_attn=False,
             ),
             cross_attn_cfg=dict(
                 embed_dims=embed_dims,
                 num_heads=8,
-                dropout=0.0,
+                attn_drop=0.0,
+                proj_drop=0.0,
                 batch_first=True,
                 cross_attn=True,
             ),
