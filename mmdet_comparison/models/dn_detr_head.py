@@ -27,6 +27,10 @@ def split_matching_dn_outputs(
     dn_bbox_preds = all_layers_bbox_preds[:, :, :num_dn, :]
     matching_cls_scores = all_layers_cls_scores[:, :, num_dn:, :]
     matching_bbox_preds = all_layers_bbox_preds[:, :, num_dn:, :]
+    matching_cls_scores = torch.nan_to_num(matching_cls_scores, nan=0.0, posinf=50.0, neginf=-50.0)
+    matching_bbox_preds = torch.nan_to_num(matching_bbox_preds, nan=0.5, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
+    dn_cls_scores = torch.nan_to_num(dn_cls_scores, nan=0.0, posinf=50.0, neginf=-50.0)
+    dn_bbox_preds = torch.nan_to_num(dn_bbox_preds, nan=0.5, posinf=1.0, neginf=0.0).clamp(0.0, 1.0)
     return matching_cls_scores, matching_bbox_preds, dn_cls_scores, dn_bbox_preds
 
 

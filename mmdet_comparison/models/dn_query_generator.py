@@ -156,6 +156,7 @@ class DNQueryGenerator(nn.Module):
 
         noisy_labels = self._apply_label_noise(target_labels, target_weights)
         noisy_boxes = self._apply_box_noise(target_bboxes, target_weights)
+        noisy_boxes = self._fill_padding_boxes(noisy_boxes, target_weights)
         label_query = self.label_embedding(noisy_labels)
         bbox_query = inverse_sigmoid(noisy_boxes)
         mask = self._build_self_attn_mask(pad_size, group_size, num_matching_queries, device)
@@ -198,6 +199,24 @@ class DNQueryGenerator(nn.Module):
         noised = torch.cat((noisy_centers, noisy_wh), dim=-1).clamp(0.0, 1.0)
         noisy[valid] = noised[valid]
         return noisy.clamp(0.0, 1.0)
+
+    @staticmethod
+    def _fill_padding_boxes(boxes: Tensor, weights: Tensor) -> Tensor:
+        """Give padded DN queries a numerically stable anchor box.
+
+        DAB-DETR's decoder divides by reference width/height when modulated
+        height-width attention is enabled. Padding slots are ignored by DN loss,
+        but they still flow through the decoder, so their reference boxes must
+        not have near-zero width/height.
+        """
+
+        padded = weights <= 0
+        if not bool(padded.any()):
+            return boxes
+        boxes = boxes.clone()
+        default_box = boxes.new_tensor([0.5, 0.5, 0.2, 0.2])
+        boxes[padded] = default_box
+        return boxes
 
     def _build_self_attn_mask(
         self,

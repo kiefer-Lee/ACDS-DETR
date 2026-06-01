@@ -43,3 +43,22 @@ def test_dn_query_generator_shapes_and_mask():
     assert bool(output.self_attn_mask[8, 0])
     assert bool(output.self_attn_mask[0, 4])
     assert not bool(output.self_attn_mask[0, 1])
+
+
+def test_dn_query_generator_padding_boxes_are_stable():
+    generator = DNQueryGenerator(
+        num_classes=10,
+        embed_dims=32,
+        num_groups=2,
+        label_noise_scale=0.0,
+        box_noise_scale=0.0,
+    )
+    full = make_sample([1, 3], [[10, 20, 30, 50], [50, 10, 80, 40]])
+    sparse = make_sample([2], [[5, 5, 15, 15]])
+    output = generator([full, sparse], num_matching_queries=5)
+    weights = output.meta["target_weights"]
+
+    decoder_boxes = output.bbox_query.sigmoid()
+    padded_boxes = decoder_boxes[weights <= 0]
+    assert padded_boxes.numel() > 0
+    assert torch.all(padded_boxes[:, 2:] >= 0.19)
