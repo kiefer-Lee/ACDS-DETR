@@ -76,6 +76,7 @@ model = dict(
 train_dataloader = dict(
     batch_size=3,
     num_workers=12,
+    collate_fn=dict(_delete_=True, type="yolov5_collate", use_ms_training=False),
     dataset=dict(
         type="YOLOv5CocoDataset",
         data_root=data_root,
