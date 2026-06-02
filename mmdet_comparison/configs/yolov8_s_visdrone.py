@@ -1,7 +1,5 @@
 _base_ = ["mmyolo::yolov8/yolov8_s_syncbn_fast_8xb16-500e_coco.py"]
 
-custom_imports = dict(imports=["mmdet_acds", "mmdet_comparison", "mmyolo"], allow_failed_imports=False)
-
 num_classes = 10
 visdrone_classes = (
     "pedestrian",
