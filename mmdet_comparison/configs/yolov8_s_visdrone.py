@@ -68,8 +68,8 @@ train_pipeline_stage2 = [
 model = dict(
     bbox_head=dict(
         head_module=dict(num_classes=num_classes),
-        train_cfg=dict(assigner=dict(num_classes=num_classes)),
     ),
+    train_cfg=dict(assigner=dict(num_classes=num_classes)),
     test_cfg=dict(max_per_img=500),
 )
 
