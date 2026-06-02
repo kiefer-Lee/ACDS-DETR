@@ -106,8 +106,7 @@ val_evaluator = dict(
     type="mmdet.CocoMetric",
     ann_file=data_root + "annotations/val.json",
     metric="bbox",
-    iou_thrs=[0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95],
-    proposal_nums=(100, 300, 500),
+    proposal_nums=(1, 10, 100),
 )
 test_evaluator = val_evaluator
 
