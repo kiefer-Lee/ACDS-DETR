@@ -88,6 +88,8 @@ class DNQueryGenerator(nn.Module):
         num_groups: int = 5,
         label_noise_scale: float = 0.2,
         box_noise_scale: float = 0.4,
+        max_gt_per_image: int | None = None,
+        max_dn_queries: int | None = None,
     ) -> None:
         super().__init__()
         self.num_classes = int(num_classes)
@@ -95,6 +97,8 @@ class DNQueryGenerator(nn.Module):
         self.num_groups = int(num_groups)
         self.label_noise_scale = float(label_noise_scale)
         self.box_noise_scale = float(box_noise_scale)
+        self.max_gt_per_image = None if max_gt_per_image is None else int(max_gt_per_image)
+        self.max_dn_queries = None if max_dn_queries is None else int(max_dn_queries)
         self.label_embedding = nn.Embedding(self.num_classes + 1, self.embed_dims)
 
     @property
@@ -114,8 +118,12 @@ class DNQueryGenerator(nn.Module):
         gt_labels: list[Tensor] = []
         gt_boxes: list[Tensor] = []
         max_gt = 0
+        original_max_gt = 0
+        gt_cap = self._resolve_gt_cap()
         for sample in batch_data_samples:
             labels, boxes = get_labels_and_boxes(sample, device)
+            original_max_gt = max(original_max_gt, int(labels.numel()))
+            labels, boxes = self._limit_gt(labels, boxes, gt_cap)
             gt_labels.append(labels)
             gt_boxes.append(boxes)
             max_gt = max(max_gt, int(labels.numel()))
@@ -132,6 +140,8 @@ class DNQueryGenerator(nn.Module):
                 target_labels=torch.empty(batch_size, 0, dtype=torch.long, device=device),
                 target_bboxes=torch.empty(batch_size, 0, 4, dtype=torch.float32, device=device),
                 target_weights=torch.empty(batch_size, 0, dtype=torch.float32, device=device),
+                original_max_gt=int(original_max_gt),
+                dn_gt_cap=gt_cap,
             )
             return DNQueryOutput(label_query, bbox_query, mask, meta)
 
@@ -163,12 +173,29 @@ class DNQueryGenerator(nn.Module):
             num_denoising_groups=int(self.num_groups),
             num_matching_queries=int(num_matching_queries),
             max_gt=int(max_gt),
+            original_max_gt=int(original_max_gt),
+            dn_gt_cap=gt_cap,
             group_size=int(group_size),
             target_labels=target_labels,
             target_bboxes=target_bboxes,
             target_weights=target_weights,
         )
         return DNQueryOutput(label_query, bbox_query, mask, meta)
+
+    def _resolve_gt_cap(self) -> int | None:
+        caps = []
+        if self.max_gt_per_image is not None and self.max_gt_per_image > 0:
+            caps.append(self.max_gt_per_image)
+        if self.max_dn_queries is not None and self.max_dn_queries > 0 and self.num_groups > 0:
+            caps.append(max(1, self.max_dn_queries // self.num_groups))
+        return min(caps) if caps else None
+
+    @staticmethod
+    def _limit_gt(labels: Tensor, boxes: Tensor, gt_cap: int | None) -> tuple[Tensor, Tensor]:
+        if gt_cap is None or int(labels.numel()) <= gt_cap:
+            return labels, boxes
+        indices = torch.randperm(int(labels.numel()), device=labels.device)[:gt_cap]
+        return labels[indices], boxes[indices]
 
     def _apply_label_noise(self, labels: Tensor, weights: Tensor) -> Tensor:
         noisy = labels.clone()

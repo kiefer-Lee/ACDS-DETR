@@ -84,3 +84,23 @@ def test_dn_query_count_follows_scalar_times_max_gt():
     assert output.label_query.shape == (2, 10, 32)
     assert output.bbox_query.shape == (2, 10, 4)
     assert output.self_attn_mask.shape == (310, 310)
+
+
+def test_dn_query_generator_caps_dense_images():
+    generator = DNQueryGenerator(
+        num_classes=10,
+        embed_dims=32,
+        num_groups=5,
+        label_noise_scale=0.0,
+        box_noise_scale=0.0,
+        max_dn_queries=15,
+    )
+    labels = list(range(10))
+    boxes = [[i, i, i + 5, i + 5] for i in range(10)]
+    output = generator([make_sample(labels, boxes)], num_matching_queries=300, device=torch.device("cpu"))
+
+    assert output.meta["original_max_gt"] == 10
+    assert output.meta["max_gt"] == 3
+    assert output.meta["dn_gt_cap"] == 3
+    assert output.meta["num_denoising_queries"] == 15
+    assert output.label_query.shape == (1, 15, 32)

@@ -14,6 +14,7 @@ class _NoopRegistry:
 
 
 try:  # pragma: no cover - exercised in the target MMDetection environment.
-    from mmdet.registry import MODELS
+    from mmdet.registry import DATA_SAMPLERS, MODELS
 except Exception:  # pragma: no cover - local tests can run without mmdet.
+    DATA_SAMPLERS = _NoopRegistry()
     MODELS = _NoopRegistry()
