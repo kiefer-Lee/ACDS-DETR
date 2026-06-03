@@ -1,4 +1,4 @@
-"""Denoising query generation for DN-DETR style training."""
+"""Denoising query generation for DN-DETR training."""
 
 from __future__ import annotations
 
@@ -77,8 +77,8 @@ class DNQueryGenerator(nn.Module):
     """Create DN-DETR denoising label and box queries.
 
     The generated queries are prepended to the normal matching queries. Targets
-    are padded to the largest GT count in the batch, then repeated over
-    positive/negative copies inside each denoising group.
+    are padded to the largest GT count in the batch, then repeated over scalar
+    denoising groups following the official DN-DETR formulation.
     """
 
     def __init__(
@@ -99,7 +99,7 @@ class DNQueryGenerator(nn.Module):
 
     @property
     def copies_per_group(self) -> int:
-        return 2
+        return 1
 
     def forward(
         self,
@@ -135,7 +135,7 @@ class DNQueryGenerator(nn.Module):
             )
             return DNQueryOutput(label_query, bbox_query, mask, meta)
 
-        group_size = max_gt * self.copies_per_group
+        group_size = max_gt
         pad_size = group_size * self.num_groups
         target_labels = torch.full((batch_size, pad_size), self.num_classes, dtype=torch.long, device=device)
         target_bboxes = torch.zeros(batch_size, pad_size, 4, dtype=torch.float32, device=device)
@@ -147,12 +147,10 @@ class DNQueryGenerator(nn.Module):
                 continue
             for group_idx in range(self.num_groups):
                 base = group_idx * group_size
-                for copy_idx in range(self.copies_per_group):
-                    start = base + copy_idx * max_gt
-                    end = start + num_gt
-                    target_labels[batch_idx, start:end] = labels
-                    target_bboxes[batch_idx, start:end] = boxes
-                    target_weights[batch_idx, start:end] = 1.0
+                end = base + num_gt
+                target_labels[batch_idx, base:end] = labels
+                target_bboxes[batch_idx, base:end] = boxes
+                target_weights[batch_idx, base:end] = 1.0
 
         noisy_labels = self._apply_label_noise(target_labels, target_weights)
         noisy_boxes = self._apply_box_noise(target_bboxes, target_weights)
@@ -192,7 +190,7 @@ class DNQueryGenerator(nn.Module):
         wh = boxes[..., 2:].clamp(min=1e-4)
         centers = boxes[..., :2]
         noise = (torch.rand_like(boxes) * 2.0 - 1.0) * self.box_noise_scale
-        center_noise = noise[..., :2] * wh
+        center_noise = noise[..., :2] * wh * 0.5
         size_noise = noise[..., 2:] * wh
         noisy_centers = centers + center_noise
         noisy_wh = (wh + size_noise).clamp(min=1e-4, max=1.0)

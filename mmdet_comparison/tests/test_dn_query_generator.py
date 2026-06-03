@@ -34,14 +34,15 @@ def test_dn_query_generator_shapes_and_mask():
     sample = make_sample([1, 3], [[10, 20, 30, 50], [50, 10, 80, 40]])
     output = generator([sample], num_matching_queries=5)
 
-    assert output.label_query.shape == (1, 8, 32)
-    assert output.bbox_query.shape == (1, 8, 4)
-    assert output.self_attn_mask.shape == (13, 13)
-    assert output.meta["num_denoising_queries"] == 8
+    assert output.label_query.shape == (1, 4, 32)
+    assert output.bbox_query.shape == (1, 4, 4)
+    assert output.self_attn_mask.shape == (9, 9)
+    assert output.meta["num_denoising_queries"] == 4
     assert output.meta["num_denoising_groups"] == 2
-    assert output.meta["target_weights"].sum().item() == 8
-    assert bool(output.self_attn_mask[8, 0])
-    assert bool(output.self_attn_mask[0, 4])
+    assert output.meta["target_weights"].sum().item() == 4
+    assert bool(output.self_attn_mask[4, 0])
+    assert bool(output.self_attn_mask[0, 2])
+    assert bool(output.self_attn_mask[2, 0])
     assert not bool(output.self_attn_mask[0, 1])
 
 
@@ -62,3 +63,24 @@ def test_dn_query_generator_padding_boxes_are_stable():
     padded_boxes = decoder_boxes[weights <= 0]
     assert padded_boxes.numel() > 0
     assert torch.all(padded_boxes[:, 2:] >= 0.19)
+
+
+def test_dn_query_count_follows_scalar_times_max_gt():
+    generator = DNQueryGenerator(
+        num_classes=10,
+        embed_dims=32,
+        num_groups=5,
+        label_noise_scale=0.0,
+        box_noise_scale=0.0,
+    )
+
+    full = make_sample([0, 1], [[0, 0, 10, 20], [10, 20, 30, 40]])
+    sparse = make_sample([0], [[0, 0, 10, 20]])
+    output = generator([full, sparse], num_matching_queries=300, device=torch.device("cpu"))
+
+    assert output.meta["max_gt"] == 2
+    assert output.meta["group_size"] == 2
+    assert output.meta["num_denoising_queries"] == 10
+    assert output.label_query.shape == (2, 10, 32)
+    assert output.bbox_query.shape == (2, 10, 4)
+    assert output.self_attn_mask.shape == (310, 310)

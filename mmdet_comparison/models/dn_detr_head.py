@@ -113,12 +113,40 @@ class DNDETRHead(_MMDetDABDETRHead):
             zero = dn_bbox_preds.sum() * 0.0
             return format_dn_losses(zero, zero, zero)
 
-        last_cls = dn_cls_scores[-1]
-        last_bbox = dn_bbox_preds[-1]
-        num_classes = int(last_cls.shape[-1])
+        losses: dict[str, Tensor] = {}
+        num_layers = int(dn_cls_scores.shape[0])
+        for layer_idx in range(num_layers):
+            loss_cls, loss_bbox, loss_iou = self.loss_dn_single(
+                dn_cls_scores[layer_idx],
+                dn_bbox_preds[layer_idx],
+                target_labels,
+                target_bboxes,
+                valid,
+            )
+            if layer_idx == num_layers - 1:
+                losses.update(format_dn_losses(loss_cls, loss_bbox, loss_iou))
+            else:
+                losses.update(
+                    {
+                        f"d{layer_idx}.loss_dn_cls": loss_cls,
+                        f"d{layer_idx}.loss_dn_bbox": loss_bbox,
+                        f"d{layer_idx}.loss_dn_iou": loss_iou,
+                    }
+                )
+        return losses
+
+    def loss_dn_single(
+        self,
+        cls_scores: Tensor,
+        bbox_preds: Tensor,
+        target_labels: Tensor,
+        target_bboxes: Tensor,
+        valid: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor]:
+        num_classes = int(cls_scores.shape[-1])
         flat_valid = valid.reshape(-1)
-        pred_logits = last_cls.reshape(-1, num_classes)[flat_valid]
-        pred_boxes = last_bbox.reshape(-1, 4)[flat_valid]
+        pred_logits = cls_scores.reshape(-1, num_classes)[flat_valid]
+        pred_boxes = bbox_preds.reshape(-1, 4)[flat_valid]
         labels = target_labels.reshape(-1)[flat_valid].clamp(min=0, max=num_classes - 1)
         boxes = target_bboxes.reshape(-1, 4)[flat_valid]
 
@@ -128,4 +156,4 @@ class DNDETRHead(_MMDetDABDETRHead):
         giou = generalized_box_iou(bbox_cxcywh_to_xyxy(pred_boxes), bbox_cxcywh_to_xyxy(boxes)).diag()
         loss_iou = (1.0 - giou).sum() / avg_factor
         loss_iou = loss_iou * float(getattr(self.loss_iou, "loss_weight", 1.0))
-        return format_dn_losses(loss_cls, loss_bbox, loss_iou)
+        return loss_cls, loss_bbox, loss_iou
