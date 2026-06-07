@@ -16,6 +16,10 @@ Implemented methods:
 - `FCOS`: uses MMDetection's official FCOS detector.
 - `YOLOv8`: uses MMYOLO's official YOLOv8 config through the OpenMMLab config
   package mechanism. Install `mmyolo` before running this config.
+- `Sky-YOLO`: reproduces the published YOLOv8n-based UAV small-object detector
+  with MSFConv in the second backbone convolution, P2/P3/P4 Light-BiFPN outputs,
+  and Wise-IoU v3 box loss. The paper does not release official code, so the
+  module-level details are implemented from the architecture text/figures.
 
 External comparison entries:
 
@@ -48,6 +52,9 @@ mim train mmdet mmdet_comparison/configs/fcos_r50_fpn_visdrone.py \
 
 mim train mmyolo mmdet_comparison/configs/yolov8_s_visdrone.py \
   --work-dir work_dirs/comparison/yolov8_s_visdrone/seed_0
+
+mim train mmyolo mmdet_comparison/configs/sky_yolo_n_visdrone.py \
+  --work-dir work_dirs/comparison/sky_yolo_n_visdrone/seed_0
 ```
 
 Use the same `--cfg-options` data-root overrides documented in
@@ -74,4 +81,24 @@ CUDA_VISIBLE_DEVICES=0,1 mim train mmdet \
   --gpus $GPUS \
   --work-dir work_dirs/comparison/dino_detr_r50_visdrone/seed_0 \
   --cfg-options $COMMON_OPTS randomness.seed=0 randomness.deterministic=False
+```
+
+Sky-YOLO full example:
+
+```bash
+cd /data/libaichuan/Projects/SOD/ACDS-DETR
+export PYTHONPATH=$PWD:$PYTHONPATH
+
+DATA_ROOT=/root/blockdata/Datasets/VisDrone/
+mim train mmyolo \
+  mmdet_comparison/configs/sky_yolo_n_visdrone.py \
+  --work-dir work_dirs/comparison/sky_yolo_n_visdrone/seed_0 \
+  --cfg-options \
+    data_root=$DATA_ROOT \
+    train_dataloader.dataset.data_root=$DATA_ROOT \
+    val_dataloader.dataset.data_root=$DATA_ROOT \
+    test_dataloader.dataset.data_root=$DATA_ROOT \
+    val_evaluator.ann_file=${DATA_ROOT}annotations/val.json \
+    test_evaluator.ann_file=${DATA_ROOT}annotations/val.json \
+    randomness.seed=0 randomness.deterministic=False
 ```
