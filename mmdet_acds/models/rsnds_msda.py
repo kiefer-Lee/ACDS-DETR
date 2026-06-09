@@ -55,7 +55,7 @@ class ReliabilityGuidedScaleSampler(nn.Module):
         if self.reliability == "mlp":
             rho = torch.sigmoid(self.mlp(query.float())) if self.mlp is not None else torch.zeros_like(gamma_scale)
         elif pred_logits is not None:
-            prob = pred_logits.detach().float().softmax(-1)[..., :-1]
+            prob = pred_logits.detach().float().sigmoid()
             rho = prob.max(-1, keepdim=True).values
         else:
             rho = torch.zeros_like(gamma_scale)
