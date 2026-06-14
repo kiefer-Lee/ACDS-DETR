@@ -65,8 +65,6 @@ COMMON_CFG_OPTIONS=(
   'test_dataloader.dataset.metainfo.classes=("car","truck","bus")'
   val_evaluator.ann_file="$DATA_ROOT/$TEST_ANN"
   test_evaluator.ann_file="$DATA_ROOT/$TEST_ANN"
-  num_classes=3
-  model.bbox_head.num_classes=3
 )
 
 if [[ "$EXPORT_JSON" == "1" || "$EXPORT_JSON" == "true" ]]; then
@@ -81,4 +79,3 @@ CUDA_VISIBLE_DEVICES="$CUDA_DEVICES" mim test "$MIM_PACKAGE" "$CONFIG" \
   --checkpoint "$CHECKPOINT" \
   --work-dir "$TEST_WORK_DIR" \
   --cfg-options "${COMMON_CFG_OPTIONS[@]}" "$@"
-

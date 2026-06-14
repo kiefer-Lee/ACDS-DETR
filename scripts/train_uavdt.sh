@@ -61,8 +61,6 @@ COMMON_CFG_OPTIONS=(
   randomness.deterministic=False
   default_hooks.checkpoint.max_keep_ckpts=2
   default_hooks.checkpoint.save_last=True
-  num_classes=3
-  model.bbox_head.num_classes=3
 )
 
 CUDA_VISIBLE_DEVICES="$CUDA_DEVICES" mim train "$MIM_PACKAGE" "$CONFIG" \
@@ -70,4 +68,3 @@ CUDA_VISIBLE_DEVICES="$CUDA_DEVICES" mim train "$MIM_PACKAGE" "$CONFIG" \
   --gpus "$GPUS" \
   --work-dir "$WORK_DIR" \
   --cfg-options "${COMMON_CFG_OPTIONS[@]}" "$@"
-
