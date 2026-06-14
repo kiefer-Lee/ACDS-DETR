@@ -108,7 +108,8 @@ def _ap(coco_eval: COCOeval, area_label: str, iou: float | None = None) -> float
     area_idx = coco_eval.params.areaRngLbl.index(area_label)
     max_det_idx = len(coco_eval.params.maxDets) - 1
     if iou is None:
-        values = precision[:, :, :, area_idx, max_det_idx]
+        iou_mask = np.asarray(coco_eval.params.iouThrs) >= 0.50
+        values = precision[iou_mask, :, :, area_idx, max_det_idx]
     else:
         values = precision[_idx(coco_eval.params.iouThrs, iou), :, :, area_idx, max_det_idx]
     return _mean_valid(values)
@@ -119,7 +120,8 @@ def _ar(coco_eval: COCOeval, area_label: str, iou: float | None = None) -> float
     area_idx = coco_eval.params.areaRngLbl.index(area_label)
     max_det_idx = len(coco_eval.params.maxDets) - 1
     if iou is None:
-        values = recall[:, :, area_idx, max_det_idx]
+        iou_mask = np.asarray(coco_eval.params.iouThrs) >= 0.50
+        values = recall[iou_mask, :, area_idx, max_det_idx]
     else:
         values = recall[_idx(coco_eval.params.iouThrs, iou), :, area_idx, max_det_idx]
     return _mean_valid(values)
@@ -137,6 +139,7 @@ def evaluate(ann_file: Path, det_file: Path, max_dets: list[int]) -> dict[str, f
     coco_dt = coco_gt.loadRes(str(det_file))
 
     coco_eval = COCOeval(coco_gt, coco_dt, iouType="bbox")
+    coco_eval.params.iouThrs = np.asarray([0.25, 0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95])
     coco_eval.params.maxDets = sorted(max_dets)
     coco_eval.params.areaRng = [list(v) for v in AREA_RANGES.values()]
     coco_eval.params.areaRngLbl = list(AREA_RANGES.keys())
