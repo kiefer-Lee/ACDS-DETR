@@ -41,20 +41,29 @@ if [[ ! -d "$DATA_ROOT/$VAL_IMG_PREFIX" ]]; then
   exit 1
 fi
 
+if [[ "$CUDA_DEVICES" != "all" && "$CUDA_DEVICES" != "ALL" ]]; then
+  IFS=',' read -ra VISIBLE_DEVICES <<< "$CUDA_DEVICES"
+  if (( ${#VISIBLE_DEVICES[@]} < GPUS )); then
+    echo "GPUS=$GPUS but CUDA_DEVICES exposes only ${#VISIBLE_DEVICES[@]} device(s): $CUDA_DEVICES" >&2
+    echo "Set GPUS to the number of visible devices, e.g. CUDA_DEVICES=0 GPUS=1 or CUDA_DEVICES=0,1 GPUS=2." >&2
+    exit 1
+  fi
+fi
+
 COMMON_CFG_OPTIONS=(
   data_root="$DATA_ROOT"
   train_dataloader.dataset.data_root="$DATA_ROOT"
   train_dataloader.dataset.ann_file="$TRAIN_ANN"
   train_dataloader.dataset.data_prefix.img=""
-  'train_dataloader.dataset.metainfo.classes=("car","truck","bus")'
+  'train_dataloader.dataset.metainfo.classes=("car","bus","truck")'
   val_dataloader.dataset.data_root="$DATA_ROOT"
   val_dataloader.dataset.ann_file="$VAL_ANN"
   val_dataloader.dataset.data_prefix.img=""
-  'val_dataloader.dataset.metainfo.classes=("car","truck","bus")'
+  'val_dataloader.dataset.metainfo.classes=("car","bus","truck")'
   test_dataloader.dataset.data_root="$DATA_ROOT"
   test_dataloader.dataset.ann_file="$VAL_ANN"
   test_dataloader.dataset.data_prefix.img=""
-  'test_dataloader.dataset.metainfo.classes=("car","truck","bus")'
+  'test_dataloader.dataset.metainfo.classes=("car","bus","truck")'
   val_evaluator.ann_file="$DATA_ROOT/$VAL_ANN"
   test_evaluator.ann_file="$DATA_ROOT/$VAL_ANN"
   randomness.seed="$SEED"

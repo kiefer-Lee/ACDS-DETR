@@ -6,7 +6,7 @@ train_ann_file = "annotations/train.json"
 val_ann_file = "annotations/val.json"
 train_img_prefix = ""
 val_img_prefix = ""
-uavdt_classes = ("car", "truck", "bus")
+uavdt_classes = ("car", "bus", "truck")
 metainfo = dict(classes=uavdt_classes)
 
 img_size = 1024
@@ -80,4 +80,3 @@ val_evaluator = dict(
     proposal_nums=(100, 300, 500),
 )
 test_evaluator = val_evaluator
-

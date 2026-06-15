@@ -34,6 +34,14 @@ if [[ ! -d "$DATA_ROOT/$TEST_IMG_PREFIX" ]]; then
   exit 1
 fi
 
+if [[ "$CUDA_DEVICES" != "all" && "$CUDA_DEVICES" != "ALL" ]]; then
+  IFS=',' read -ra VISIBLE_DEVICES <<< "$CUDA_DEVICES"
+  if (( ${#VISIBLE_DEVICES[@]} < 1 )); then
+    echo "CUDA_DEVICES does not expose any device: $CUDA_DEVICES" >&2
+    exit 1
+  fi
+fi
+
 if [[ -z "$CHECKPOINT" ]]; then
   if [[ ! -d "$WORK_DIR" ]]; then
     echo "WORK_DIR does not exist: $WORK_DIR" >&2
@@ -56,13 +64,13 @@ COMMON_CFG_OPTIONS=(
   val_dataloader.dataset.data_root="$DATA_ROOT"
   val_dataloader.dataset.ann_file="$TEST_ANN"
   val_dataloader.dataset.data_prefix.img=""
-  'val_dataloader.dataset.metainfo.classes=("car","truck","bus")'
+  'val_dataloader.dataset.metainfo.classes=("car","bus","truck")'
   test_dataloader.batch_size="$TEST_BATCH_SIZE"
   test_dataloader.num_workers="$TEST_NUM_WORKERS"
   test_dataloader.dataset.data_root="$DATA_ROOT"
   test_dataloader.dataset.ann_file="$TEST_ANN"
   test_dataloader.dataset.data_prefix.img=""
-  'test_dataloader.dataset.metainfo.classes=("car","truck","bus")'
+  'test_dataloader.dataset.metainfo.classes=("car","bus","truck")'
   val_evaluator.ann_file="$DATA_ROOT/$TEST_ANN"
   test_evaluator.ann_file="$DATA_ROOT/$TEST_ANN"
 )

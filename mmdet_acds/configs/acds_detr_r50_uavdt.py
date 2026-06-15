@@ -7,7 +7,7 @@ train_ann_file = "annotations/train.json"
 val_ann_file = "annotations/val.json"
 train_img_prefix = ""
 val_img_prefix = ""
-uavdt_classes = ("car", "truck", "bus")
+uavdt_classes = ("car", "bus", "truck")
 metainfo = dict(classes=uavdt_classes)
 
 model = dict(bbox_head=dict(num_classes=num_classes))
@@ -33,4 +33,3 @@ test_dataloader = val_dataloader
 
 val_evaluator = dict(ann_file=data_root + val_ann_file)
 test_evaluator = val_evaluator
-

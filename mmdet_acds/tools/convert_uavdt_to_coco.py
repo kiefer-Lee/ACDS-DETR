@@ -7,15 +7,18 @@ Two layouts are supported.
     root/train/images/*.jpg
     root/train/labels/*.txt
 
-   Label columns are expected to be:
+    Label columns are expected to be:
 
-    class_id, x_center, y_center, width, height
+     class_id, x_center, y_center, width, height
+
+   UAVDT YOLO class ids are expected to be 0=car, 1=bus, 2=truck by
+   default. They are remapped to COCO category ids 1=car, 2=bus, 3=truck.
 
 2. Original DET/MOT-style sequence layout. Expected annotation columns are:
 
     frame_id, target_id, x, y, width, height, out_of_view, occlusion, category
 
-COCO category ids are written as 1=car, 2=truck, 3=bus.
+COCO category ids are written as 1=car, 2=bus, 3=truck.
 """
 
 from __future__ import annotations
@@ -31,6 +34,11 @@ from PIL import Image
 from mmdet_acds.datasets.uavdt_metainfo import UAVDT_CLASSES
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".bmp"}
+UAVDT_YOLO_TO_COCO_ID = {
+    0: 1,  # car
+    1: 2,  # bus
+    2: 3,  # truck
+}
 
 
 def _read_sequence_names(path: Path) -> list[str]:
@@ -126,7 +134,9 @@ def _parse_yolo_line(line: str, width: int, height: int, category_base: str) -> 
         return None
 
     raw_category_id = int(float(parts[0]))
-    if category_base == "zero":
+    if category_base == "uavdt":
+        category_id = UAVDT_YOLO_TO_COCO_ID.get(raw_category_id, -1)
+    elif category_base == "zero":
         category_id = raw_category_id + 1
     elif category_base == "one":
         category_id = raw_category_id
@@ -156,7 +166,7 @@ def convert_yolo_split(
     split: str,
     output: str | Path,
     min_area: float = 1.0,
-    category_base: str = "auto",
+    category_base: str = "uavdt",
 ) -> None:
     root = Path(root)
     split_dir = root / split
@@ -301,9 +311,13 @@ def main() -> None:
     parser.add_argument("--min-area", type=float, default=1.0)
     parser.add_argument(
         "--category-base",
-        choices=["auto", "zero", "one"],
-        default="auto",
-        help="YOLO label class id base. Use zero for 0/1/2 labels, one for 1/2/3 labels.",
+        choices=["uavdt", "auto", "zero", "one"],
+        default="uavdt",
+        help=(
+            "YOLO label class mapping. uavdt maps 0=car, 1=bus, 2=truck to "
+            "COCO ids 1=car, 2=bus, 3=truck. Use zero for linear 0/1/2 -> "
+            "1/2/3 labels, one for already one-based 1/2/3 labels."
+        ),
     )
     args = parser.parse_args()
     if args.split is not None:
