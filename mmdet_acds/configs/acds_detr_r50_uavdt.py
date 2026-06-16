@@ -1,6 +1,7 @@
 _base_ = ["./acds_detr_r50_visdrone.py"]
 
 num_classes = 3
+num_queries = 600
 data_root = "../Datasets/UAVDT/"
 data_root = data_root if data_root.endswith(("/", "\\")) else data_root + "/"
 train_ann_file = "annotations/train_stride3.json"
