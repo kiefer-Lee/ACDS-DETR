@@ -9,8 +9,8 @@ val_img_prefix = ""
 uavdt_classes = ("car", "truck", "bus")
 metainfo = dict(classes=uavdt_classes)
 
-img_size = 1024
-max_size = 1600
+img_size = 800
+max_size = 1333
 train_scales = [(max_size, img_size)]
 
 train_pipeline = [
