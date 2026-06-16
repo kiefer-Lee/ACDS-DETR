@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
+import os
 import sys
 import traceback
 from collections import defaultdict
@@ -23,9 +23,15 @@ if __package__ in {None, ""}:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check ACDS-DETR UAVDT CUDA memory.")
-    parser.add_argument("config", type=Path, help="MMDetection config path.")
+    parser.add_argument(
+        "config",
+        nargs="?",
+        type=Path,
+        default=None,
+        help="MMDetection config path. Defaults to CONFIG from train_uavdt.sh, or acds_detr_r50_uavdt.py.",
+    )
     parser.add_argument("--device", default="cuda:0", help="Device used for the train_step probe.")
-    parser.add_argument("--batch-size", type=int, default=None, help="Override train dataloader batch size.")
+    parser.add_argument("--batch-size", type=int, default=None, help="Override train_uavdt.sh train_dataloader.batch_size.")
     parser.add_argument("--num-queries", type=int, default=None, help="Override model.num_queries.")
     parser.add_argument("--topk", type=int, default=20, help="Number of dense images to probe.")
     parser.add_argument("--repeat", type=int, default=1, help="Repeat each probe batch for random augments.")
@@ -44,9 +50,81 @@ def parse_args() -> argparse.Namespace:
         "--cfg-options",
         nargs="+",
         default=None,
-        help="Extra MMEngine cfg overrides, e.g. model.num_queries=500 train_dataloader.batch_size=1.",
+        help="Extra MMEngine cfg overrides applied after train_uavdt.sh-compatible defaults.",
     )
     return parser.parse_args()
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def resolve_default_data_root(root: Path) -> str:
+    data_root = Path(os.environ.get("DATA_ROOT", root / "../Datasets/UAVDT"))
+    if not data_root.is_absolute():
+        data_root = (root / data_root).resolve()
+    return str(data_root)
+
+
+def train_script_defaults(config_arg: Path | None) -> tuple[Path, dict[str, Any], dict[str, str]]:
+    root = project_root()
+    config = config_arg or Path(os.environ.get("CONFIG", "mmdet_acds/configs/acds_detr_r50_uavdt.py"))
+    if not config.is_absolute():
+        config = root / config
+
+    data_root = resolve_default_data_root(root)
+    train_frame_stride = os.environ.get("TRAIN_FRAME_STRIDE", "6")
+    val_frame_stride = os.environ.get("VAL_FRAME_STRIDE", "6")
+    train_ann = os.environ.get("TRAIN_ANN", f"annotations/train_stride{train_frame_stride}.json")
+    val_ann = os.environ.get("VAL_ANN", f"annotations/val_stride{val_frame_stride}.json")
+    train_img_prefix = os.environ.get("TRAIN_IMG_PREFIX", "")
+    val_img_prefix = os.environ.get("VAL_IMG_PREFIX", "")
+    train_split = os.environ.get("TRAIN_SPLIT", "train")
+    val_split = os.environ.get("VAL_SPLIT", "val")
+
+    defaults = {
+        "data_root": data_root,
+        "train_dataloader.dataset.data_root": data_root,
+        "train_dataloader.dataset.ann_file": train_ann,
+        "train_dataloader.dataset.data_prefix.img": train_img_prefix,
+        "train_dataloader.batch_size": 3,
+        "train_dataloader.dataset.metainfo.classes": ("car", "truck", "bus"),
+        "val_dataloader.dataset.data_root": data_root,
+        "val_dataloader.dataset.ann_file": val_ann,
+        "val_dataloader.dataset.data_prefix.img": val_img_prefix,
+        "val_dataloader.batch_size": 3,
+        "val_dataloader.dataset.metainfo.classes": ("car", "truck", "bus"),
+        "test_dataloader.dataset.data_root": data_root,
+        "test_dataloader.dataset.ann_file": val_ann,
+        "test_dataloader.dataset.data_prefix.img": val_img_prefix,
+        "test_dataloader.dataset.metainfo.classes": ("car", "truck", "bus"),
+        "val_evaluator.ann_file": str(Path(data_root) / val_ann),
+        "test_evaluator.ann_file": str(Path(data_root) / val_ann),
+    }
+    env_defaults = {
+        "DATA_ROOT": data_root,
+        "TRAIN_ANN": train_ann,
+        "VAL_ANN": val_ann,
+        "TRAIN_SPLIT": train_split,
+        "VAL_SPLIT": val_split,
+        "TRAIN_FRAME_STRIDE": train_frame_stride,
+        "VAL_FRAME_STRIDE": val_frame_stride,
+    }
+    return config.resolve(), defaults, env_defaults
+
+
+def ensure_annotation(ann_path: Path, data_root: str, split: str, frame_stride: str) -> None:
+    if ann_path.exists():
+        return
+    from mmdet_acds.tools.convert_uavdt_to_coco import convert
+
+    print(f"Generating annotation: {ann_path}")
+    convert(
+        root=data_root,
+        output=ann_path,
+        split=split,
+        frame_stride=int(frame_stride),
+    )
 
 
 def import_runtime() -> tuple[Any, Any, Any, Any, Any]:
@@ -170,10 +248,17 @@ def build_optimizer(torch: Any, model: Any, optim_wrapper_cls: Any, lr: float) -
 
 
 def run_probe(args: argparse.Namespace) -> int:
+    cuda_devices = os.environ.get("CUDA_DEVICES")
+    if cuda_devices and cuda_devices.upper() != "ALL" and "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = cuda_devices
+
     torch, Config, pseudo_collate, OptimWrapper, init_default_scope, registries = import_runtime()
     DATASETS, MODELS = registries
 
-    cfg = Config.fromfile(args.config)
+    config_path, train_defaults, env_defaults = train_script_defaults(args.config)
+    print(f"Using config: {config_path}")
+    cfg = Config.fromfile(config_path)
+    cfg.merge_from_dict(train_defaults)
     extra_options = parse_cfg_options(args.cfg_options)
     if extra_options:
         cfg.merge_from_dict(extra_options)
@@ -186,10 +271,16 @@ def run_probe(args: argparse.Namespace) -> int:
 
     print_effective_config(cfg)
 
-    cfg_dir = args.config.resolve().parent
+    cfg_dir = config_path.parent
     data_root = cfg.train_dataloader.dataset.get("data_root", "")
     ann_file = cfg.train_dataloader.dataset.get("ann_file", "")
     ann_path = resolve_path(cfg_dir, data_root, ann_file)
+    ensure_annotation(
+        ann_path=ann_path,
+        data_root=env_defaults["DATA_ROOT"],
+        split=env_defaults["TRAIN_SPLIT"],
+        frame_stride=env_defaults["TRAIN_FRAME_STRIDE"],
+    )
     if not ann_path.exists():
         raise FileNotFoundError(f"Training annotation not found: {ann_path}")
 
