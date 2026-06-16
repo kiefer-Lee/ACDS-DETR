@@ -11,7 +11,7 @@ val_img_prefix = ""
 uavdt_classes = ("car", "truck", "bus")
 metainfo = dict(classes=uavdt_classes)
 
-model = dict(bbox_head=dict(num_classes=num_classes))
+model = dict(num_queries=num_queries, bbox_head=dict(num_classes=num_classes))
 
 train_dataloader = dict(
     dataset=dict(
