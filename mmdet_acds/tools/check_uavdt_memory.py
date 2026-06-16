@@ -225,8 +225,14 @@ def print_effective_config(cfg: Any) -> None:
 
 def select_probe_indices(dataset: Any, image_by_id: dict[int, dict[str, Any]], gt_count_by_id: dict[int, int], topk: int) -> list[int]:
     dataset.full_init()
+    dataset_len = len(dataset)
+    print(f"MMDetection dataset length: {dataset_len}")
+    if dataset_len == 0:
+        return []
+
     candidates = []
-    for index, item in enumerate(dataset.data_list):
+    for index in range(dataset_len):
+        item = dataset.get_data_info(index)
         img_id = int(item.get("img_id", item.get("id", -1)))
         image = image_by_id.get(img_id, {})
         gt_count = len(item.get("instances", [])) or gt_count_by_id.get(img_id, 0)
@@ -303,7 +309,11 @@ def run_probe(args: argparse.Namespace) -> int:
     dataset = DATASETS.build(cfg.train_dataloader.dataset)
     indices = select_probe_indices(dataset, image_by_id, gt_count_by_id, args.topk)
     if not indices:
-        raise RuntimeError("No probe samples selected.")
+        raise RuntimeError(
+            "No probe samples selected. The COCO file was readable, but the built "
+            "MMDetection dataset length is 0. Check data_root, ann_file, data_prefix, "
+            "metainfo/classes, and filter_cfg."
+        )
 
     model = MODELS.build(cfg.model)
     model.to(args.device)
