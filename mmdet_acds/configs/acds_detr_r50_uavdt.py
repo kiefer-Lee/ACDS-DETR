@@ -1,13 +1,13 @@
 _base_ = ["./acds_detr_r50_visdrone.py"]
 
 num_classes = 3
-data_root = "/root/blockdata/Datasets/UAVDT/"
+data_root = "../Datasets/UAVDT/"
 data_root = data_root if data_root.endswith(("/", "\\")) else data_root + "/"
-train_ann_file = "annotations/train.json"
-val_ann_file = "annotations/val.json"
+train_ann_file = "annotations/train_stride3.json"
+val_ann_file = "annotations/val_stride3.json"
 train_img_prefix = ""
 val_img_prefix = ""
-uavdt_classes = ("car", "bus", "truck")
+uavdt_classes = ("car", "truck", "bus")
 metainfo = dict(classes=uavdt_classes)
 
 model = dict(bbox_head=dict(num_classes=num_classes))
