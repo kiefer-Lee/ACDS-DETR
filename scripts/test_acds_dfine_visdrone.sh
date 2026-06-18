@@ -2,14 +2,28 @@
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-ACDS_ROOT=${ACDS_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}
-DFINE_ROOT=${DFINE_ROOT:-$(cd "$ACDS_ROOT/../D-FINE" && pwd)}
+DEFAULT_SOD_ROOT=/data/libaichuan/Projects/SOD
+if [[ -d "$DEFAULT_SOD_ROOT" ]]; then
+  SOD_ROOT=${SOD_ROOT:-$DEFAULT_SOD_ROOT}
+else
+  SOD_ROOT=${SOD_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}
+fi
 
-DATA_ROOT=${DATA_ROOT:-$(cd "$ACDS_ROOT/../Datasets/VisDrone" 2>/dev/null && pwd || echo "$ACDS_ROOT/../Datasets/VisDrone")}
+ACDS_ROOT=${ACDS_ROOT:-$SOD_ROOT/ACDS-DETR}
+DFINE_ROOT=${DFINE_ROOT:-$SOD_ROOT/D-FINE}
+
+if [[ -d "$SOD_ROOT/Dataset" ]]; then
+  DEFAULT_DATASET_ROOT="$SOD_ROOT/Dataset"
+else
+  DEFAULT_DATASET_ROOT="$SOD_ROOT/Datasets"
+fi
+
+DATASET_ROOT=${DATASET_ROOT:-$DEFAULT_DATASET_ROOT}
+DATA_ROOT=${DATA_ROOT:-$DATASET_ROOT/VisDrone}
 CONFIG=${CONFIG:-configs/dfine/custom/acds_dfine_hgnetv2_s_visdrone.yml}
 
-VAL_IMG_FOLDER=${VAL_IMG_FOLDER:-$DATA_ROOT/images/val}
-VAL_ANN_FILE=${VAL_ANN_FILE:-$DATA_ROOT/annotations/instances_val.json}
+TEST_IMG_FOLDER=${TEST_IMG_FOLDER:-${VAL_IMG_FOLDER:-$DATA_ROOT/VisDrone2019-DET-val/VisDrone2019-DET-val/images}}
+TEST_ANN_FILE=${TEST_ANN_FILE:-${VAL_ANN_FILE:-$DATA_ROOT/annotations/val.json}}
 
 NUM_CLASSES=${NUM_CLASSES:-10}
 GPUS=${GPUS:-1}
@@ -22,13 +36,19 @@ CHECKPOINT=${CHECKPOINT:-}
 cd "$DFINE_ROOT"
 export PYTHONPATH="$DFINE_ROOT:$ACDS_ROOT:${PYTHONPATH:-}"
 
-if [[ ! -d "$VAL_IMG_FOLDER" ]]; then
-  echo "Missing image folder: $VAL_IMG_FOLDER" >&2
+echo "SOD root: $SOD_ROOT"
+echo "D-FINE root: $DFINE_ROOT"
+echo "VisDrone root: $DATA_ROOT"
+echo "Test images: $TEST_IMG_FOLDER"
+echo "Test annotation: $TEST_ANN_FILE"
+
+if [[ ! -d "$TEST_IMG_FOLDER" ]]; then
+  echo "Missing image folder: $TEST_IMG_FOLDER" >&2
   exit 1
 fi
 
-if [[ ! -f "$VAL_ANN_FILE" ]]; then
-  echo "Missing annotation file: $VAL_ANN_FILE" >&2
+if [[ ! -f "$TEST_ANN_FILE" ]]; then
+  echo "Missing annotation file: $TEST_ANN_FILE" >&2
   exit 1
 fi
 
@@ -57,6 +77,6 @@ CUDA_VISIBLE_DEVICES="$CUDA_DEVICES" torchrun \
   -u \
   num_classes="$NUM_CLASSES" \
   val_dataloader.total_batch_size="$VAL_TOTAL_BATCH_SIZE" \
-  val_dataloader.dataset.img_folder="$VAL_IMG_FOLDER" \
-  val_dataloader.dataset.ann_file="$VAL_ANN_FILE" \
+  val_dataloader.dataset.img_folder="$TEST_IMG_FOLDER" \
+  val_dataloader.dataset.ann_file="$TEST_ANN_FILE" \
   "$@"
