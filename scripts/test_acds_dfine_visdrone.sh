@@ -24,6 +24,8 @@ CONFIG=${CONFIG:-configs/dfine/custom/acds_dfine_hgnetv2_s_visdrone.yml}
 
 TEST_IMG_FOLDER=${TEST_IMG_FOLDER:-${VAL_IMG_FOLDER:-$DATA_ROOT/VisDrone2019-DET-val/VisDrone2019-DET-val/images}}
 TEST_ANN_FILE=${TEST_ANN_FILE:-${VAL_ANN_FILE:-$DATA_ROOT/annotations/val.json}}
+REMAP_CATEGORY_IDS=${REMAP_CATEGORY_IDS:-1}
+DFINE_ANN_DIR=${DFINE_ANN_DIR:-$DATA_ROOT/annotations/dfine}
 
 NUM_CLASSES=${NUM_CLASSES:-10}
 GPUS=${GPUS:-1}
@@ -52,6 +54,16 @@ if [[ ! -f "$TEST_ANN_FILE" ]]; then
   exit 1
 fi
 
+TEST_ANN_FOR_DFINE="$TEST_ANN_FILE"
+if [[ "$REMAP_CATEGORY_IDS" == "1" || "$REMAP_CATEGORY_IDS" == "true" ]]; then
+  TEST_ANN_FOR_DFINE="$DFINE_ANN_DIR/val_zero_based.json"
+  python "$ACDS_ROOT/acds_dfine/tools/remap_coco_categories_zero_based.py" \
+    --ann-in "$TEST_ANN_FILE" \
+    --ann-out "$TEST_ANN_FOR_DFINE"
+fi
+
+echo "D-FINE test annotation: $TEST_ANN_FOR_DFINE"
+
 if [[ -z "$CHECKPOINT" ]]; then
   if [[ ! -d "$OUTPUT_DIR" ]]; then
     echo "OUTPUT_DIR does not exist: $OUTPUT_DIR" >&2
@@ -78,5 +90,5 @@ CUDA_VISIBLE_DEVICES="$CUDA_DEVICES" torchrun \
   num_classes="$NUM_CLASSES" \
   val_dataloader.total_batch_size="$VAL_TOTAL_BATCH_SIZE" \
   val_dataloader.dataset.img_folder="$TEST_IMG_FOLDER" \
-  val_dataloader.dataset.ann_file="$TEST_ANN_FILE" \
+  val_dataloader.dataset.ann_file="$TEST_ANN_FOR_DFINE" \
   "$@"

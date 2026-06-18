@@ -26,6 +26,8 @@ TRAIN_IMG_FOLDER=${TRAIN_IMG_FOLDER:-$DATA_ROOT/VisDrone2019-DET-train/VisDrone2
 TRAIN_ANN_FILE=${TRAIN_ANN_FILE:-$DATA_ROOT/annotations/train.json}
 VAL_IMG_FOLDER=${VAL_IMG_FOLDER:-$DATA_ROOT/VisDrone2019-DET-val/VisDrone2019-DET-val/images}
 VAL_ANN_FILE=${VAL_ANN_FILE:-$DATA_ROOT/annotations/val.json}
+REMAP_CATEGORY_IDS=${REMAP_CATEGORY_IDS:-1}
+DFINE_ANN_DIR=${DFINE_ANN_DIR:-$DATA_ROOT/annotations/dfine}
 
 NUM_CLASSES=${NUM_CLASSES:-10}
 GPUS=${GPUS:-1}
@@ -67,6 +69,22 @@ for path in "$TRAIN_ANN_FILE" "$VAL_ANN_FILE"; do
   fi
 done
 
+TRAIN_ANN_FOR_DFINE="$TRAIN_ANN_FILE"
+VAL_ANN_FOR_DFINE="$VAL_ANN_FILE"
+if [[ "$REMAP_CATEGORY_IDS" == "1" || "$REMAP_CATEGORY_IDS" == "true" ]]; then
+  TRAIN_ANN_FOR_DFINE="$DFINE_ANN_DIR/train_zero_based.json"
+  VAL_ANN_FOR_DFINE="$DFINE_ANN_DIR/val_zero_based.json"
+  python "$ACDS_ROOT/acds_dfine/tools/remap_coco_categories_zero_based.py" \
+    --ann-in "$TRAIN_ANN_FILE" \
+    --ann-out "$TRAIN_ANN_FOR_DFINE"
+  python "$ACDS_ROOT/acds_dfine/tools/remap_coco_categories_zero_based.py" \
+    --ann-in "$VAL_ANN_FILE" \
+    --ann-out "$VAL_ANN_FOR_DFINE"
+fi
+
+echo "D-FINE train annotation: $TRAIN_ANN_FOR_DFINE"
+echo "D-FINE val annotation: $VAL_ANN_FOR_DFINE"
+
 ARGS=(
   -c "$CONFIG"
   --seed "$SEED"
@@ -79,10 +97,10 @@ ARGS=(
   print_freq="$PRINT_FREQ"
   train_dataloader.total_batch_size="$TRAIN_TOTAL_BATCH_SIZE"
   train_dataloader.dataset.img_folder="$TRAIN_IMG_FOLDER"
-  train_dataloader.dataset.ann_file="$TRAIN_ANN_FILE"
+  train_dataloader.dataset.ann_file="$TRAIN_ANN_FOR_DFINE"
   val_dataloader.total_batch_size="$VAL_TOTAL_BATCH_SIZE"
   val_dataloader.dataset.img_folder="$VAL_IMG_FOLDER"
-  val_dataloader.dataset.ann_file="$VAL_ANN_FILE"
+  val_dataloader.dataset.ann_file="$VAL_ANN_FOR_DFINE"
 )
 
 if [[ -n "$STOP_EPOCH" ]]; then
