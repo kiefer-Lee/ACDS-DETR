@@ -37,8 +37,10 @@ STOP_EPOCH=${STOP_EPOCH:-}
 
 VRAM_DEVICE_INDEX=${VRAM_DEVICE_INDEX:-0}
 VRAM_STEPS=${VRAM_STEPS:-1}
+VRAM_PROBE_MODE=${VRAM_PROBE_MODE:-worst_boxes}
 VRAM_PROBE_SCALE=${VRAM_PROBE_SCALE:-max}
 VRAM_PROBE_SIZE=${VRAM_PROBE_SIZE:-}
+VRAM_STRICT_DISABLE_RANDOM_AUG=${VRAM_STRICT_DISABLE_RANDOM_AUG:-1}
 VRAM_SAFETY_FRACTION=${VRAM_SAFETY_FRACTION:-0.90}
 VRAM_RESERVE_GB=${VRAM_RESERVE_GB:-1.0}
 
@@ -53,6 +55,9 @@ echo "Train annotation: $TRAIN_ANN_FILE"
 echo "Config: $CONFIG"
 echo "TRAIN_TOTAL_BATCH_SIZE: $TRAIN_TOTAL_BATCH_SIZE"
 echo "GPUS: $GPUS"
+echo "VRAM probe mode: $VRAM_PROBE_MODE"
+echo "VRAM probe scale: $VRAM_PROBE_SCALE"
+echo "Disable random box-dropping aug: $VRAM_STRICT_DISABLE_RANDOM_AUG"
 
 if [[ ! -d "$TRAIN_IMG_FOLDER" ]]; then
   echo "Missing image folder: $TRAIN_IMG_FOLDER" >&2
@@ -84,7 +89,9 @@ ARGS=(
   --use-amp "$USE_AMP"
   --device-index "$VRAM_DEVICE_INDEX"
   --steps "$VRAM_STEPS"
+  --probe-mode "$VRAM_PROBE_MODE"
   --probe-scale "$VRAM_PROBE_SCALE"
+  --strict-disable-random-aug "$VRAM_STRICT_DISABLE_RANDOM_AUG"
   --safety-fraction "$VRAM_SAFETY_FRACTION"
   --reserve-gb "$VRAM_RESERVE_GB"
   --seed "$SEED"
@@ -100,4 +107,3 @@ fi
 
 CUDA_VISIBLE_DEVICES="$CUDA_DEVICES" python \
   "$ACDS_ROOT/acds_dfine/tools/check_dfine_vram.py" "${ARGS[@]}" "$@"
-

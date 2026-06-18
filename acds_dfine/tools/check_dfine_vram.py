@@ -9,9 +9,11 @@ simulates the per-GPU batch size derived from total batch size / world size.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import traceback
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +72,115 @@ def _move_targets_to_device(targets: list[dict[str, Any]], device: Any) -> list[
     ]
 
 
+def _annotation_is_valid(annotation: dict[str, Any]) -> bool:
+    if int(annotation.get("iscrowd", 0)) != 0:
+        return False
+    bbox = annotation.get("bbox", None)
+    if not bbox or len(bbox) < 4:
+        return False
+    return float(bbox[2]) > 0 and float(bbox[3]) > 0
+
+
+def _rank_dense_images(ann_file: str | Path) -> list[dict[str, Any]]:
+    with open(ann_file, "r", encoding="utf-8") as handle:
+        coco = json.load(handle)
+
+    counts: Counter[int] = Counter()
+    for annotation in coco.get("annotations", []):
+        if _annotation_is_valid(annotation):
+            counts[int(annotation["image_id"])] += 1
+
+    images = {}
+    for image in coco.get("images", []):
+        image_id = int(image["id"])
+        width = float(image.get("width", 0) or 0)
+        height = float(image.get("height", 0) or 0)
+        images[image_id] = {
+            "image_id": image_id,
+            "file_name": image.get("file_name", ""),
+            "width": width,
+            "height": height,
+            "area": width * height,
+            "box_count": counts.get(image_id, 0),
+        }
+
+    ranked = sorted(
+        images.values(),
+        key=lambda item: (-int(item["box_count"]), -float(item["area"]), int(item["image_id"])),
+    )
+    return [item for item in ranked if int(item["box_count"]) > 0]
+
+
+def _dataset_indices_for_dense_batch(
+    dataset: Any,
+    ann_file: str | Path,
+    batch_size: int,
+) -> tuple[list[int], list[dict[str, Any]]]:
+    if not hasattr(dataset, "ids"):
+        raise ValueError("The configured train dataset does not expose COCO image ids.")
+
+    index_by_image_id = {int(image_id): idx for idx, image_id in enumerate(dataset.ids)}
+    ranked_images = _rank_dense_images(ann_file)
+    selected_indices: list[int] = []
+    selected_images: list[dict[str, Any]] = []
+
+    for image_info in ranked_images:
+        image_id = int(image_info["image_id"])
+        if image_id not in index_by_image_id:
+            continue
+        selected_indices.append(index_by_image_id[image_id])
+        selected_images.append(image_info)
+        if len(selected_indices) == batch_size:
+            break
+
+    if not selected_indices:
+        raise ValueError("No valid annotated image was found for worst-boxes VRAM probing.")
+
+    base_indices = list(selected_indices)
+    base_images = list(selected_images)
+    while len(selected_indices) < batch_size:
+        pos = len(selected_indices) % len(base_indices)
+        selected_indices.append(base_indices[pos])
+        selected_images.append(base_images[pos])
+
+    return selected_indices, selected_images
+
+
+def _set_strict_probe_epoch(loader: Any, disable_random_aug: bool) -> None:
+    dataset = getattr(loader, "dataset", None)
+    collate_fn = getattr(loader, "collate_fn", None)
+    if disable_random_aug and hasattr(dataset, "set_epoch"):
+        dataset.set_epoch(10**9)
+    elif hasattr(dataset, "set_epoch"):
+        dataset.set_epoch(0)
+
+    if hasattr(collate_fn, "set_epoch"):
+        collate_fn.set_epoch(0)
+
+
+def _iter_probe_batches(
+    loader: Any,
+    mode: str,
+    ann_file: str | Path,
+    batch_size: int,
+    steps: int,
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    if mode == "dataloader":
+        batches = []
+        for _, batch in zip(range(steps), loader):
+            batches.append(batch)
+        return batches, []
+
+    selected_indices, selected_images = _dataset_indices_for_dense_batch(
+        loader.dataset,
+        ann_file,
+        batch_size,
+    )
+    items = [loader.dataset[index] for index in selected_indices]
+    batch = loader.collate_fn(items)
+    return [batch for _ in range(steps)], selected_images
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Check whether ACDS-D-FINE training may OOM.")
     parser.add_argument("--dfine-root", required=True, type=Path)
@@ -83,8 +194,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--use-amp", type=_bool_arg, default=True)
     parser.add_argument("--device-index", type=int, default=0)
     parser.add_argument("--steps", type=int, default=1)
+    parser.add_argument("--probe-mode", choices=["worst_boxes", "dataloader"], default="worst_boxes")
     parser.add_argument("--probe-scale", choices=["max", "base", "random"], default="max")
     parser.add_argument("--probe-size", type=int, default=None)
+    parser.add_argument("--strict-disable-random-aug", type=_bool_arg, default=True)
     parser.add_argument("--safety-fraction", type=float, default=0.90)
     parser.add_argument("--reserve-gb", type=float, default=1.0)
     parser.add_argument("--seed", type=int, default=0)
@@ -157,6 +270,7 @@ def main() -> int:
     print(f"  total batch size: {args.total_batch_size}")
     print(f"  world size / GPUS: {args.world_size}")
     print(f"  simulated per-GPU batch size: {per_gpu_batch}")
+    print(f"  probe mode: {args.probe_mode}")
     print(f"  AMP: {bool(args.use_amp)}")
     print(f"  device: {torch.cuda.get_device_name(device)}")
 
@@ -170,8 +284,15 @@ def main() -> int:
         optimizer = cfg.optimizer
         scaler = cfg.scaler if args.use_amp else None
         loader = cfg.train_dataloader
-        loader.set_epoch(0)
+        _set_strict_probe_epoch(loader, args.strict_disable_random_aug)
         scale_desc = _configure_probe_scale(loader, args.probe_scale, args.probe_size)
+        probe_batches, selected_images = _iter_probe_batches(
+            loader,
+            args.probe_mode,
+            args.train_ann_file,
+            per_gpu_batch,
+            args.steps,
+        )
 
         model.train()
         criterion.train()
@@ -179,7 +300,7 @@ def main() -> int:
         torch.cuda.reset_peak_memory_stats(device)
 
         last_loss = None
-        for step, (samples, targets) in zip(range(args.steps), loader):
+        for step, (samples, targets) in enumerate(probe_batches):
             optimizer.zero_grad(set_to_none=True)
             samples = samples.to(device, non_blocking=True)
             targets = _move_targets_to_device(targets, device)
@@ -213,7 +334,18 @@ def main() -> int:
 
         print("")
         print("Result")
+        print(f"  probe mode: {args.probe_mode}")
         print(f"  probe scale: {scale_desc}")
+        if selected_images:
+            print("  densest images in simulated batch:")
+            for idx, image in enumerate(selected_images[:per_gpu_batch]):
+                print(
+                    "    "
+                    f"{idx:02d}: image_id={int(image['image_id'])}, "
+                    f"boxes={int(image['box_count'])}, "
+                    f"size={int(image['width'])}x{int(image['height'])}, "
+                    f"file={image['file_name']}"
+                )
         print(f"  steps: {args.steps}")
         print(f"  last loss: {last_loss:.6f}" if last_loss is not None else "  last loss: n/a")
         print(f"  peak allocated: {_gb(peak_alloc):.2f} GiB")
