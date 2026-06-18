@@ -33,8 +33,13 @@ MASTER_PORT=${MASTER_PORT:-7777}
 CUDA_DEVICES=${CUDA_DEVICES:-0}
 SEED=${SEED:-0}
 USE_AMP=${USE_AMP:-1}
+EPOCHS=${EPOCHS:-220}
 TRAIN_TOTAL_BATCH_SIZE=${TRAIN_TOTAL_BATCH_SIZE:-64}
 VAL_TOTAL_BATCH_SIZE=${VAL_TOTAL_BATCH_SIZE:-128}
+VAL_INTERVAL=${VAL_INTERVAL:-1}
+CHECKPOINT_FREQ=${CHECKPOINT_FREQ:-12}
+PRINT_FREQ=${PRINT_FREQ:-100}
+STOP_EPOCH=${STOP_EPOCH:-}
 OUTPUT_DIR=${OUTPUT_DIR:-./output/acds_dfine_hgnetv2_s_visdrone}
 
 cd "$DFINE_ROOT"
@@ -68,6 +73,10 @@ ARGS=(
   --output-dir "$OUTPUT_DIR"
   -u
   num_classes="$NUM_CLASSES"
+  epochs="$EPOCHS"
+  val_interval="$VAL_INTERVAL"
+  checkpoint_freq="$CHECKPOINT_FREQ"
+  print_freq="$PRINT_FREQ"
   train_dataloader.total_batch_size="$TRAIN_TOTAL_BATCH_SIZE"
   train_dataloader.dataset.img_folder="$TRAIN_IMG_FOLDER"
   train_dataloader.dataset.ann_file="$TRAIN_ANN_FILE"
@@ -75,6 +84,13 @@ ARGS=(
   val_dataloader.dataset.img_folder="$VAL_IMG_FOLDER"
   val_dataloader.dataset.ann_file="$VAL_ANN_FILE"
 )
+
+if [[ -n "$STOP_EPOCH" ]]; then
+  ARGS+=(
+    train_dataloader.dataset.transforms.policy.epoch="$STOP_EPOCH"
+    train_dataloader.collate_fn.stop_epoch="$STOP_EPOCH"
+  )
+fi
 
 if [[ "$USE_AMP" == "1" || "$USE_AMP" == "true" ]]; then
   ARGS+=(--use-amp)
