@@ -1,0 +1,5 @@
+__include__:
+  - ../../D-FINE/configs/dfine/custom/acds_dfine_hgnetv2_s_visdrone.yml
+
+output_dir: ./output/ablation/07_full_acds_dfine
+

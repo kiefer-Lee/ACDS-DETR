@@ -1,0 +1,30 @@
+__include__:
+  - ../../D-FINE/configs/dfine/custom/acds_dfine_hgnetv2_s_visdrone.yml
+
+output_dir: ./output/ablation/01_acq_only
+
+DFINETransformer:
+  scale_aware_query:
+    enabled: False
+  rsnds:
+    enabled: False
+
+DFINECriterion:
+  acds:
+    acq_enabled: True
+    acq_loss_weight: 0.03
+    acq_apply_last_n_layers: 2
+    acq_topk_unmatched: 30
+    acq_delta: 0.03
+    acq_sigma: 0.06
+    acq_min_score: 0.40
+    small_area_thr: 1024.0
+    small_object_cost_gain: 0.0
+    class_cost: 2.0
+    bbox_cost: 5.0
+    giou_cost: 2.0
+    use_sigmoid_cls: True
+    target_box_format: cxcywh_norm
+  matcher:
+    small_object_cost_gain: 0.0
+

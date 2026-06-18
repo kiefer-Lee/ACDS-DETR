@@ -1,0 +1,16 @@
+__include__:
+  - ../../D-FINE/configs/dfine/custom/acds_dfine_hgnetv2_s_visdrone.yml
+
+output_dir: ./output/ablation/00_dfine_baseline
+
+DFINETransformer:
+  scale_aware_query:
+    enabled: False
+  rsnds:
+    enabled: False
+
+DFINECriterion:
+  acds: null
+  matcher:
+    small_object_cost_gain: 0.0
+

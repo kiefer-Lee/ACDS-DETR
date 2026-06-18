@@ -1,0 +1,23 @@
+__include__:
+  - ../../D-FINE/configs/dfine/custom/acds_dfine_hgnetv2_s_visdrone.yml
+
+output_dir: ./output/ablation/06_scale_query_plus_rsnds
+
+DFINETransformer:
+  scale_aware_query:
+    enabled: True
+    groups: 4
+    strength: 0.35
+  rsnds:
+    enabled: True
+    beta: 1.0
+    gamma_base: 1.0
+    gamma_min: 0.35
+    gamma_max: 1.25
+    reliability: cls_conf
+
+DFINECriterion:
+  acds: null
+  matcher:
+    small_object_cost_gain: 0.0
+
