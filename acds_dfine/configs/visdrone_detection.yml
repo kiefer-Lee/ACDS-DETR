@@ -1,0 +1,43 @@
+# D-FINE custom dataset template for VisDrone converted to COCO format.
+
+task: detection
+
+evaluator:
+  type: CocoEvaluator
+  iou_types: ["bbox"]
+
+num_classes: 10
+remap_mscoco_category: False
+
+train_dataloader:
+  type: DataLoader
+  dataset:
+    type: CocoDetection
+    img_folder: /path/to/VisDrone/images/train
+    ann_file: /path/to/VisDrone/annotations/instances_train.json
+    return_masks: False
+    transforms:
+      type: Compose
+      ops: ~
+  shuffle: True
+  num_workers: 4
+  drop_last: True
+  collate_fn:
+    type: BatchImageCollateFunction
+
+val_dataloader:
+  type: DataLoader
+  dataset:
+    type: CocoDetection
+    img_folder: /path/to/VisDrone/images/val
+    ann_file: /path/to/VisDrone/annotations/instances_val.json
+    return_masks: False
+    transforms:
+      type: Compose
+      ops: ~
+  shuffle: False
+  num_workers: 4
+  drop_last: False
+  collate_fn:
+    type: BatchImageCollateFunction
+

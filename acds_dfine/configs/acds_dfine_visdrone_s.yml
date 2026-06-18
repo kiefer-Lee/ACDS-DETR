@@ -1,0 +1,50 @@
+# Template for an ACDS-D-FINE-S VisDrone run.
+# Copy this into the official D-FINE repo and adjust the base/include paths to
+# match the checked-out D-FINE version.
+
+__include__:
+  - ../dfine/dfine_hgnetv2_s_coco.yml
+  - ./visdrone_detection.yml
+
+output_dir: ./outputs/acds_dfine_s_visdrone
+
+num_classes: 10
+remap_mscoco_category: False
+
+DFINECriterion:
+  acds:
+    acq_enabled: True
+    acq_loss_weight: 0.03
+    acq_apply_last_n_layers: 2
+    acq_topk_unmatched: 30
+    acq_delta: 0.03
+    acq_sigma: 0.06
+    acq_min_score: 0.40
+    small_area_thr: 1024.0
+    small_object_cost_gain: 0.20
+    class_cost: 2.0
+    bbox_cost: 5.0
+    giou_cost: 2.0
+    use_sigmoid_cls: True
+    target_box_format: cxcywh_norm
+  matcher:
+    type: HungarianMatcher
+    weight_dict: {cost_class: 2, cost_bbox: 5, cost_giou: 2}
+    alpha: 0.25
+    gamma: 2.0
+    small_area_thr: 1024.0
+    small_object_cost_gain: 0.20
+    small_object_image_size: [640, 640]
+
+DFINETransformer:
+  scale_aware_query:
+    enabled: True
+    groups: 4
+    strength: 0.35
+  rsnds:
+    enabled: True
+    beta: 1.0
+    gamma_base: 1.0
+    gamma_min: 0.35
+    gamma_max: 1.25
+    reliability: cls_conf
