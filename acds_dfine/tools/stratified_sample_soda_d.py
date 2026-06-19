@@ -23,7 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--image-dir", default="Images")
     parser.add_argument("--out-image-dir", default="mimi_images")
     parser.add_argument("--out-annotation-dir", default="mini-annotations")
-    parser.add_argument("--fraction", type=float, default=0.25)
+    parser.add_argument("--fraction", type=float, default=1 / 3)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
         "--copy-mode",
