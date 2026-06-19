@@ -246,14 +246,43 @@ class DFineACDSCriterion(nn.Module):
         layers.append(outputs)
         return layers[-max(1, int(self.cfg.acq_apply_last_n_layers)) :]
 
-    def forward(self, outputs: dict[str, Any], targets: Sequence[Any]) -> dict[str, torch.Tensor]:
+    def _indices_for_layers(
+        self,
+        indices: Sequence[tuple[torch.Tensor, torch.Tensor]]
+        | Sequence[Sequence[tuple[torch.Tensor, torch.Tensor]]]
+        | None,
+        num_layers: int,
+    ) -> list[Sequence[tuple[torch.Tensor, torch.Tensor]] | None]:
+        if indices is None:
+            return [None] * num_layers
+        if len(indices) == 0:
+            return [None] * num_layers
+
+        first = indices[0]
+        if isinstance(first, tuple):
+            return [indices] * num_layers  # type: ignore[list-item]
+
+        layer_indices = list(indices)  # type: ignore[arg-type]
+        if len(layer_indices) < num_layers:
+            return [None] * (num_layers - len(layer_indices)) + layer_indices
+        return layer_indices[-num_layers:]
+
+    def forward(
+        self,
+        outputs: dict[str, Any],
+        targets: Sequence[Any],
+        indices: Sequence[tuple[torch.Tensor, torch.Tensor]]
+        | Sequence[Sequence[tuple[torch.Tensor, torch.Tensor]]]
+        | None = None,
+    ) -> dict[str, torch.Tensor]:
         layers = self._layers_from_outputs(outputs)
         if not layers:
             raise ValueError("outputs must contain pred_logits and pred_boxes")
 
         total = None
         qcr_values = []
-        for layer in layers:
+        layer_indices = self._indices_for_layers(indices, len(layers))
+        for layer, indices_for_layer in zip(layers, layer_indices):
             cls_scores = layer["pred_logits"]
             bbox_preds = layer["pred_boxes"]
             gt_instances = build_gt_instances_for_acq(
@@ -261,20 +290,27 @@ class DFineACDSCriterion(nn.Module):
                 target_box_format=self.cfg.target_box_format,
                 device=bbox_preds.device,
             )
-            indices = small_object_hungarian_indices(
+            if indices_for_layer is None:
+                indices_for_layer = small_object_hungarian_indices(
+                    cls_scores,
+                    bbox_preds,
+                    gt_instances,
+                    target_box_format="xyxy_abs",
+                    small_object_cost_gain=self.cfg.small_object_cost_gain,
+                    small_area_thr=self.cfg.small_area_thr,
+                    class_cost=self.cfg.class_cost,
+                    bbox_cost=self.cfg.bbox_cost,
+                    giou_cost=self.cfg.giou_cost,
+                    use_sigmoid_cls=self.cfg.use_sigmoid_cls,
+                )
+            refs = layer.get("reference_points", None)
+            loss, stats = self.loss_acq(
                 cls_scores,
                 bbox_preds,
                 gt_instances,
-                target_box_format="xyxy_abs",
-                small_object_cost_gain=self.cfg.small_object_cost_gain,
-                small_area_thr=self.cfg.small_area_thr,
-                class_cost=self.cfg.class_cost,
-                bbox_cost=self.cfg.bbox_cost,
-                giou_cost=self.cfg.giou_cost,
-                use_sigmoid_cls=self.cfg.use_sigmoid_cls,
+                indices=indices_for_layer,
+                reference_points=refs,
             )
-            refs = layer.get("reference_points", None)
-            loss, stats = self.loss_acq(cls_scores, bbox_preds, gt_instances, indices=indices, reference_points=refs)
             total = loss if total is None else total + loss
             qcr_values.append(stats["query_collision_rate"])
 
@@ -323,4 +359,3 @@ def apply_rsnds_to_sampling_offsets(sampling_offsets: torch.Tensor, gamma: torch
     if gamma.shape[-1] == 1:
         gamma = gamma.repeat_interleave(2, dim=-1)
     return sampling_offsets * gamma[:, :, None, None, None, :].to(dtype=sampling_offsets.dtype)
-

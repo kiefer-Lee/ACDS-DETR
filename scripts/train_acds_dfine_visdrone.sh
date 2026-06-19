@@ -38,6 +38,11 @@ USE_AMP=${USE_AMP:-1}
 EPOCHS=${EPOCHS:-220}
 TRAIN_TOTAL_BATCH_SIZE=${TRAIN_TOTAL_BATCH_SIZE:-64}
 VAL_TOTAL_BATCH_SIZE=${VAL_TOTAL_BATCH_SIZE:-128}
+TRAIN_NUM_WORKERS=${TRAIN_NUM_WORKERS:-12}
+VAL_NUM_WORKERS=${VAL_NUM_WORKERS:-8}
+PIN_MEMORY=${PIN_MEMORY:-true}
+PERSISTENT_WORKERS=${PERSISTENT_WORKERS:-true}
+PREFETCH_FACTOR=${PREFETCH_FACTOR:-4}
 VAL_INTERVAL=${VAL_INTERVAL:-1}
 CHECKPOINT_FREQ=${CHECKPOINT_FREQ:-12}
 PRINT_FREQ=${PRINT_FREQ:-100}
@@ -96,12 +101,30 @@ ARGS=(
   checkpoint_freq="$CHECKPOINT_FREQ"
   print_freq="$PRINT_FREQ"
   train_dataloader.total_batch_size="$TRAIN_TOTAL_BATCH_SIZE"
+  train_dataloader.num_workers="$TRAIN_NUM_WORKERS"
   train_dataloader.dataset.img_folder="$TRAIN_IMG_FOLDER"
   train_dataloader.dataset.ann_file="$TRAIN_ANN_FOR_DFINE"
   val_dataloader.total_batch_size="$VAL_TOTAL_BATCH_SIZE"
+  val_dataloader.num_workers="$VAL_NUM_WORKERS"
   val_dataloader.dataset.img_folder="$VAL_IMG_FOLDER"
   val_dataloader.dataset.ann_file="$VAL_ANN_FOR_DFINE"
 )
+
+if (( TRAIN_NUM_WORKERS > 0 )); then
+  ARGS+=(
+    train_dataloader.pin_memory="$PIN_MEMORY"
+    train_dataloader.persistent_workers="$PERSISTENT_WORKERS"
+    train_dataloader.prefetch_factor="$PREFETCH_FACTOR"
+  )
+fi
+
+if (( VAL_NUM_WORKERS > 0 )); then
+  ARGS+=(
+    val_dataloader.pin_memory="$PIN_MEMORY"
+    val_dataloader.persistent_workers="$PERSISTENT_WORKERS"
+    val_dataloader.prefetch_factor="$PREFETCH_FACTOR"
+  )
+fi
 
 if [[ -n "$STOP_EPOCH" ]]; then
   ARGS+=(

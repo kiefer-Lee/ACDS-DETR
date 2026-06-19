@@ -83,9 +83,11 @@ class ACQLoss(nn.Module):
             ]
 
         total_loss = boxes.sum() * 0.0
-        total_pairs = 0
+        total_pairs = bbox_preds.new_tensor(0.0)
         total_small = 0
         for b, (src_idx, tgt_idx) in enumerate(indices):
+            src_idx = src_idx.to(device)
+            tgt_idx = tgt_idx.to(device)
             if tgt_idx.numel() == 0:
                 continue
             gt = batch_gt_instances[b]
@@ -116,8 +118,6 @@ class ACQLoss(nn.Module):
                 small_thr = areas.new_tensor(self.small_area_thr).to(device) / size_prod
 
             small_mask = tgt_area[tgt_idx] < small_thr
-            if small_mask.sum() == 0:
-                continue
             matched_small_src = src_idx[small_mask]
             matched_small_tgt = tgt_idx[small_mask]
             total_small += int(matched_small_src.numel())
@@ -138,15 +138,16 @@ class ACQLoss(nn.Module):
                 box_cxcywh_to_xyxy(boxes[b, matched_small_src]),
             )[0]
             close = (dist < self.delta) | (iou > 0.3)
-            if close.sum() == 0:
-                continue
             s_i = scores[b, valid_unmatched][:, None]
             s_j = scores[b, matched_small_src][None, :]
             m_j = torch.exp(-tgt_area[matched_small_tgt][None, :].float() / (small_thr + 1e-6))
             collision = s_i * s_j * torch.exp(-dist / max(self.sigma, 1e-6)) * m_j
             collision = collision.nan_to_num(0.0).clamp(0.0, 1.0)
-            total_loss = total_loss + (collision * torch.relu(self.delta - dist))[close].mean()
-            total_pairs += int(close.sum().item())
+            close_weight = close.float()
+            pair_loss = (collision * torch.relu(self.delta - dist) * close_weight).sum()
+            pair_loss = pair_loss / close_weight.sum().clamp(min=1.0)
+            total_loss = total_loss + pair_loss
+            total_pairs = total_pairs + close_weight.sum()
 
-        qcr = bbox_preds.new_tensor(total_pairs / max(1, total_small))
+        qcr = total_pairs / max(1, total_small)
         return self.loss_weight * total_loss / max(1, len(indices)), {"query_collision_rate": qcr}

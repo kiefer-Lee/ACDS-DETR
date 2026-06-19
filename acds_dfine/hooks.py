@@ -21,12 +21,13 @@ def add_acds_losses(
     targets: Sequence[Any],
     criterion: DFineACDSCriterion,
     *,
+    indices: Sequence[tuple[torch.Tensor, torch.Tensor]] | Sequence[Sequence[tuple[torch.Tensor, torch.Tensor]]] | None = None,
     prefix: str = "",
     include_metrics: bool = False,
 ) -> MutableMapping[str, torch.Tensor]:
     """Add ACDS losses to D-FINE's existing loss dictionary in-place."""
 
-    acds_losses = criterion(outputs, targets)
+    acds_losses = criterion(outputs, targets, indices=indices)
     for name, value in acds_losses.items():
         if not include_metrics and not name.startswith("loss_"):
             continue
