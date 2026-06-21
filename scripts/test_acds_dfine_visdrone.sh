@@ -32,6 +32,7 @@ GPUS=${GPUS:-1}
 MASTER_PORT=${MASTER_PORT:-7777}
 CUDA_DEVICES=${CUDA_DEVICES:-0}
 VAL_TOTAL_BATCH_SIZE=${VAL_TOTAL_BATCH_SIZE:-128}
+MAX_DETS=${MAX_DETS:-500}
 OUTPUT_DIR=${OUTPUT_DIR:-./output/acds_dfine_hgnetv2_s_visdrone}
 CHECKPOINT=${CHECKPOINT:-}
 
@@ -88,6 +89,7 @@ CUDA_VISIBLE_DEVICES="$CUDA_DEVICES" torchrun \
   --output-dir "$OUTPUT_DIR/test" \
   -u \
   num_classes="$NUM_CLASSES" \
+  evaluator.max_dets="[1,10,$MAX_DETS]" \
   val_dataloader.total_batch_size="$VAL_TOTAL_BATCH_SIZE" \
   val_dataloader.dataset.img_folder="$TEST_IMG_FOLDER" \
   val_dataloader.dataset.ann_file="$TEST_ANN_FOR_DFINE" \
