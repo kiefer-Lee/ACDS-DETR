@@ -48,6 +48,7 @@ PREFETCH_FACTOR=${PREFETCH_FACTOR:-4}
 VAL_INTERVAL=${VAL_INTERVAL:-1}
 CHECKPOINT_FREQ=${CHECKPOINT_FREQ:-12}
 PRINT_FREQ=${PRINT_FREQ:-100}
+MAX_DETS=${MAX_DETS:-500}
 STOP_EPOCH=${STOP_EPOCH:-}
 OUTPUT_DIR=${OUTPUT_DIR:-./output/acds_dfine_hgnetv2_s_soda_d_mini}
 
@@ -104,6 +105,7 @@ ARGS=(
   val_interval="$VAL_INTERVAL"
   checkpoint_freq="$CHECKPOINT_FREQ"
   print_freq="$PRINT_FREQ"
+  evaluator.max_dets="[1,10,$MAX_DETS]"
   train_dataloader.total_batch_size="$TRAIN_TOTAL_BATCH_SIZE"
   train_dataloader.num_workers="$TRAIN_NUM_WORKERS"
   train_dataloader.dataset.img_folder="$TRAIN_IMG_FOLDER"
